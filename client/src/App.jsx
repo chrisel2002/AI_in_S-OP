@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getDashboard, getRules, deleteRule } from "./api.js";
+import { getDashboard, getRules, deleteRule, getOrders } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 
 const typePill = {
@@ -147,6 +147,14 @@ export default function App() {
 }
 
 function Row({ s, expanded, onToggle }) {
+  const [orders, setOrders] = useState(null);
+
+  useEffect(() => {
+    if (expanded && !orders) {
+      getOrders({ material: s.material, plant: s.plant, salesOffice: s.salesOffice }).then(setOrders);
+    }
+  }, [expanded]);
+
   return (
     <>
       <tr>
@@ -162,7 +170,7 @@ function Row({ s, expanded, onToggle }) {
           </div>
         </td>
         <td style={{ color: "var(--text-2)" }}>{s.detail}</td>
-        <td><button className="btn" onClick={onToggle}>{expanded ? "Hide" : "Suggest"}</button></td>
+        <td><button className="btn" onClick={onToggle}>{expanded ? "Hide" : "Detail"}</button></td>
       </tr>
       {expanded && (
         <tr>
@@ -170,9 +178,45 @@ function Row({ s, expanded, onToggle }) {
             <div className="action-panel">
               <b>Reasoning:</b> {s.reasoning}{"\n\n"}<b>AI-suggested actions:</b>{"\n"}{s.actions}
             </div>
+            <Drilldown orders={orders} />
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+// Real orders behind the signal, from the underlying_sales collection.
+function Drilldown({ orders }) {
+  if (!orders) return <div className="drill">Loading underlying orders…</div>;
+  if (!orders.available) return <div className="drill">Underlying orders need MongoDB (storage is local file).</div>;
+  const { summary, byCountry, orders: rows } = orders;
+  if (!summary.orders) return <div className="drill">No underlying orders found for this material / plant / office.</div>;
+  return (
+    <div className="drill">
+      <div className="drill-title">Underlying sales orders (historic actuals)</div>
+      <div className="drill-summary">
+        <span><b>{summary.orders}</b> orders</span>
+        <span><b>{summary.totalTons.toFixed(3)}</b> t total</span>
+        <span><b>{summary.customers}</b> customers</span>
+        <span>Top regions: {byCountry.map((c) => `${c.country} (${c.tons.toFixed(2)}t)`).join(", ")}</span>
+      </div>
+      <table className="drill-table">
+        <thead><tr><th>Date</th><th>Customer</th><th>Country</th><th>Postal</th><th>Tons</th><th>Type</th></tr></thead>
+        <tbody>
+          {rows.map((o, i) => (
+            <tr key={i}>
+              <td>{String(o.date).slice(0, 10)}</td>
+              <td>{o.customer}</td>
+              <td>{o.recipient_country}</td>
+              <td>{o.recipient_postal_code}</td>
+              <td>{Number(o.quantity_in_tons).toFixed(4)}</td>
+              <td>{o.is_contract ? "Contract" : o.is_scheduling_agreement ? "Sched. agr." : "Free stock"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {summary.orders > rows.length && <div className="drill-more">Showing latest {rows.length} of {summary.orders} orders.</div>}
+    </div>
   );
 }

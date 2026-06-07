@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import mongoose from "mongoose";
 
 import { loadData, loadDataFromMongo, getRows } from "./data.js";
 import { detectSignals, buildDashboard } from "./signals.js";
@@ -31,6 +32,58 @@ app.get("/api/dashboard", async (req, res) => {
     ...dash,
     briefing: generateBriefing(signals),
     storage: storageBackend(),
+  });
+});
+
+// --- drill-down: underlying sales orders behind a signal -----------------
+// Returns the real historic orders (from `underlying_sales`) for the signal's
+// material / plant / sales office, plus a small summary.
+app.get("/api/orders", async (req, res) => {
+  if (storageBackend() !== "mongo") return res.json({ available: false, summary: null, orders: [] });
+  const material = Number(req.query.material);
+  const plant = Number(req.query.plant);
+  const salesOffice = Number(req.query.sales_office);
+  const coll = mongoose.connection.db.collection("underlying_sales");
+  const match = {
+    material,
+    sales_office: salesOffice,
+    $or: [{ simulated_plant: plant }, { historic_plant: plant }],
+  };
+
+  const orders = await coll
+    .find(match, {
+      projection: {
+        _id: 0, date: 1, customer: 1, recipient_country: 1, recipient_postal_code: 1,
+        quantity_in_tons: 1, is_contract: 1, is_scheduling_agreement: 1,
+      },
+    })
+    .sort({ date: -1 })
+    .limit(50)
+    .toArray();
+
+  const [agg] = await coll
+    .aggregate([
+      { $match: match },
+      { $group: { _id: null, orders: { $sum: 1 }, totalTons: { $sum: "$quantity_in_tons" }, customers: { $addToSet: "$customer" } } },
+    ])
+    .toArray();
+
+  const byCountry = await coll
+    .aggregate([
+      { $match: match },
+      { $group: { _id: "$recipient_country", tons: { $sum: "$quantity_in_tons" } } },
+      { $sort: { tons: -1 } },
+      { $limit: 5 },
+    ])
+    .toArray();
+
+  res.json({
+    available: true,
+    summary: agg
+      ? { orders: agg.orders, totalTons: agg.totalTons, customers: agg.customers.length }
+      : { orders: 0, totalTons: 0, customers: 0 },
+    byCountry: byCountry.map((c) => ({ country: c._id, tons: c.tons })),
+    orders,
   });
 });
 

@@ -78,6 +78,16 @@ tr:hover td { background: var(--surface-2); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .hint { font-size: 11px; color: var(--text-2); margin-top: 6px; }
+/* drill-down (underlying orders) */
+.drill { background: #fbfbfa; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-top: 6px; font-size: 12px; }
+.drill-title { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+.drill-summary { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 10px; color: var(--text-2); }
+.drill-summary b { color: var(--text); }
+.drill-table { font-size: 11px; }
+.drill-table th { padding: 5px 8px; }
+.drill-table td { padding: 5px 8px; }
+.drill-more { font-size: 11px; color: var(--text-2); margin-top: 6px; }
+
 .rules-list { display: flex; flex-direction: column; gap: 6px; }
 .rule-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
 .rule-item small { color: var(--text-2); }
