@@ -1,0 +1,3 @@
+# Python deps for the data-cleaning pipeline (src/data_cleaning.py)
+pandas>=2.0
+numpy>=1.24
