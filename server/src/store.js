@@ -30,13 +30,15 @@ const Rule = mongoose.model("Rule", ruleSchema);
 
 export async function initStore(uri) {
   try {
-    await mongoose.connect(uri, { serverSelectionTimeoutMS: 1200 });
+    // Atlas cold connects (DNS SRV + TLS) can take a few seconds; give it room.
+    await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
     backend = "mongo";
     console.log("Storage: MongoDB connected ✅");
-  } catch {
+  } catch (e) {
     backend = "file";
     if (!fs.existsSync(FALLBACK)) fs.writeFileSync(FALLBACK, "[]");
     console.log("Storage: MongoDB unreachable — using local file fallback ⚠️");
+    console.log("  reason:", e.message);
   }
 }
 

@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 
-import { loadData, loadDataFromMongo, getRows } from "./data.js";
+import { loadDataFromMongo, getRows } from "./data.js";
 import { detectSignals, buildDashboard } from "./signals.js";
 import { generateBriefing } from "./briefing.js";
 import { parseSentence } from "./parser.js";
@@ -106,17 +106,12 @@ app.delete("/api/rules/:id", async (req, res) => {
 // --- boot ---------------------------------------------------------------
 async function start() {
   await initStore(MONGO_URI);
-  // prefer reading the plan data from Atlas; fall back to the CSV if Mongo is down
-  if (storageBackend() === "mongo") {
-    try {
-      await loadDataFromMongo();
-    } catch (e) {
-      console.log("Mongo data load failed, using CSV instead:", e.message);
-      loadData();
-    }
-  } else {
-    loadData();
+  // MongoDB Atlas is required — no CSV fallback.
+  if (storageBackend() !== "mongo") {
+    console.error("❌ Cannot start: MongoDB is required but not reachable. Check MONGO_URI / network access.");
+    process.exit(1);
   }
+  await loadDataFromMongo();
   app.listen(PORT, () => console.log(`API ready on http://localhost:${PORT}`));
 }
 start();
