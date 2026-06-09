@@ -1,23 +1,12 @@
-// Signal engine: turns plan rows + active rules into scored, prioritised signals.
-//
-// Two sources of signals:
-//   1) Built-in detectors (the 4 types that run on your real data)
-//   2) Custom user rules (threshold filters created via the rule builder)
-//
-// Each combo = material × plant × sales_office (12 monthly rows). We emit at most
-// one signal per (combo, type) — the worst month — so the list stays readable.
 
-const PRIORITY = (score) => (score >= 80 ? "High" : score >= 50 ? "Medium" : "Low");
+const PRIORITY = (score) => (score >= 85 ? "High" : score >= 60 ? "Medium" : "Low");
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-// Ignore tiny tonnages: a 1000% swing on 0.05t is noise, not a planning signal.
-// Only volumes at or above this floor (in tons) can raise a signal.
 const MIN_TONS = 5;
 
-// Map a deviation/change ratio to a 0-100 score on a log curve so scores don't all
-// saturate at 100. |dev| 0.2 -> ~56, 1.0 -> ~75, 2.0 -> ~90, 3.0+ -> 100 (critical).
+
 const ratioScore = (ratio) =>
-  clamp(Math.round(50 + 25 * Math.log2(1 + Math.abs(ratio))), 40, 100);
+  clamp(Math.round(40 + 20 * Math.log2(1 + Math.abs(ratio))), 40, 100);
 
 function comboKey(r) {
   return `${r.material}|${r.plant}|${r.sales_office}`;
@@ -38,7 +27,6 @@ function groupByCombo(rows) {
     if (!map.has(k)) map.set(k, []);
     map.get(k).push(r);
   }
-  // each combo's months sorted by date
   for (const arr of map.values()) arr.sort((a, b) => a.date.localeCompare(b.date));
   return map;
 }
@@ -54,14 +42,12 @@ function baseSignal(r, extra) {
 
 // ---- built-in detectors -------------------------------------------------
 
-// 1) Forecast deviation: demand plan vs Actuals-12M reference (same scale in this data)
 function detectForecastDeviation(months) {
   let worst = null;
   for (const r of months) {
     const reference = r.historic_sales_12_free_stock_in_tons;
     if (reference <= 0) continue;
     const plan = r.sales_free_stock_in_tons;
-    // require at least one side to be materially large
     if (Math.max(plan, reference) < MIN_TONS) continue;
     const dev = (plan - reference) / reference;
     if (Math.abs(dev) < 0.2) continue;
@@ -82,14 +68,13 @@ function detectForecastDeviation(months) {
   });
 }
 
-// 2) Month-over-month spike/drop within the 12-month plan horizon
 function detectMoMChange(months) {
   let worst = null;
   for (let i = 1; i < months.length; i++) {
     const prev = months[i - 1].sales_free_stock_in_tons;
     const curr = months[i].sales_free_stock_in_tons;
     if (Math.max(prev, curr) < MIN_TONS) continue;
-    if (prev < 0.01) continue; // a jump from ~0 is new demand, not an infinite spike
+    if (prev < 0.01) continue;
     const change = (curr - prev) / prev;
     if (Math.abs(change) < 0.3) continue;
     if (!worst || Math.abs(change) > Math.abs(worst.change)) worst = { r: months[i], change, prev, curr };
@@ -112,19 +97,21 @@ function detectMoMChange(months) {
   });
 }
 
-// 3) Low inventory while demand exists
 function detectLowInventory(months) {
   let worst = null;
   for (const r of months) {
     const inv = r.historic_inventory_12_free_stock_in_tons;
     const demand = r.sales_free_stock_in_tons;
-    if (demand < MIN_TONS) continue; // only flag stockout risk on material demand
-    if (inv >= 1) continue; // threshold: < 1 ton coverage
+    if (demand < MIN_TONS) continue;
+    if (inv >= 1) continue;
     if (!worst || inv < worst.inv) worst = { r, inv, demand };
   }
   if (!worst) return null;
   const { r, inv, demand } = worst;
-  const score = inv <= 0 ? 90 : clamp(Math.round(85 - inv * 30), 50, 90);
+  // FIX: scale inventory score more carefully — low but non-zero inventory
+  // should not automatically be "High". Score 50-85 based on coverage ratio.
+  const coverage = inv / demand; // 0 = no stock, 1 = full coverage
+  const score = inv <= 0 ? 85 : clamp(Math.round(80 - coverage * 40), 50, 85);
   return baseSignal(r, {
     type: "Stockout risk",
     month: r.date,
@@ -137,13 +124,13 @@ function detectLowInventory(months) {
   });
 }
 
-// 4) New demand where there was no historic sales
 function detectNewDemand(months) {
   for (const r of months) {
     const hist = r.historic_sales_12_free_stock_in_tons + r.historic_sales_24_free_stock_in_tons;
     const plan = r.sales_free_stock_in_tons;
     if (plan >= MIN_TONS && hist === 0) {
-      const score = 65;
+      // FIX: new demand is a medium-severity flag by default, not automatic High
+      const score = 58;
       return baseSignal(r, {
         type: "New demand",
         month: r.date,
@@ -188,8 +175,9 @@ function detectCustomRule(months, rule) {
   }
   if (!worst) return null;
   const { r, value } = worst;
-  const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 70 : 50;
+  const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 65 : 50;
   return baseSignal(r, {
+    // FIX: tag signals with the rule's name so the type-filter dropdown matches
     type: rule.name || "Custom rule",
     month: r.date,
     score,
@@ -236,12 +224,12 @@ export function buildDashboard(signals, rulesActive) {
   return {
     kpis: {
       total: signals.length,
-      critical: signals.filter((s) => s.score > 80).length,
-      medium: signals.filter((s) => s.score >= 50 && s.score <= 80).length,
+      critical: signals.filter((s) => s.score >= 85).length,
+      medium: signals.filter((s) => s.score >= 60 && s.score < 85).length,
       rulesActive,
     },
     byType,
     byBucket,
-    signals: signals.slice(0, 100), // top 100 for the table
+    signals: signals.slice(0, 100),
   };
 }
