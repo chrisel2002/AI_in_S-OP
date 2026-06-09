@@ -34,6 +34,7 @@ export default function App() {
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [builder, setBuilder] = useState(null); // null | {} | existingRule
   const [expanded, setExpanded] = useState(null);
+  const [currentPage, setCurrentPage] = useState(0);
 
   async function refresh() {
     const [d, r] = await Promise.all([getDashboard(), getRules()]);
@@ -44,10 +45,35 @@ export default function App() {
 
   if (!dash) return <div className="db">Loading dashboard…</div>;
 
+  console.log('dash', dash)
+
   const signals = dash.signals.filter(
     (s) => (typeFilter === "all" || s.type === typeFilter) && (urgencyFilter === "all" || s.priority === urgencyFilter)
   );
   const k = dash.kpis;
+
+  const handleNext = () => {
+    const nextPage = currentPage + 1;
+    setCurrentPage(nextPage);
+    fetchData(nextPage);
+  };
+
+  // Handle previous button
+  const handlePrev = () => {
+    if (currentPage > 0) {
+      const prevPage = currentPage - 1;
+      setCurrentPage(prevPage);
+      fetchData(prevPage);
+    }
+  };
+
+  const itemsPerPage = 100;
+
+  // Calculate skip and limit
+  const skip = currentPage * itemsPerPage;
+  const limit = itemsPerPage;
+  const rangeStart = currentPage * itemsPerPage;
+  const rangeEnd = rangeStart + itemsPerPage - 1;
 
   return (
     <div className="db">
@@ -57,7 +83,7 @@ export default function App() {
           <div className="topbar-title">📊 S&OP Signal Dashboard</div>
           <div className="topbar-meta">
             Planning cycle 2026-06 · {k.rulesActive} active custom rules ·
-            storage: {dash.storage === "mongo" ? "MongoDB ✅" : "local file ⚠️"}
+            {/* storage: {dash.storage === "mongo" ? "MongoDB ✅" : "local file ⚠️"} */}
           </div>
         </div>
         <div className="row-gap">
@@ -109,7 +135,53 @@ export default function App() {
       {/* signal table */}
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <div className="card-title" style={{ margin: 0 }}>Signal table — prioritised (top {dash.signals.length})</div>
+          <div className="card-title" style={{ margin: 0 }}>Signal table — prioritised ({rangeStart + 1}-{rangeEnd + 1})</div>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '20px',
+            marginTop: '30px',
+            padding: '20px',
+            borderTop: '1px solid #ccc'
+          }}>
+            {/* Previous Arrow */}
+            {/* <button
+              onClick={handlePrev}
+              disabled={currentPage === 0}
+              style={{
+                padding: '5px 8px',
+                fontSize: '14px',
+                cursor: currentPage === 0 ? 'not-allowed' : 'pointer',
+                opacity: currentPage === 0 ? 0.5 : 1,
+                border: '1px solid grey',
+                backgroundColor: '#fff',
+                color: 'grey',
+                borderRadius: '4px'
+              }}
+            >
+              ←
+            </button> */}
+
+            {/* Next Arrow */}
+            {/* <button
+              onClick={handleNext}
+              style={{
+                padding: '5px 8px',
+                fontSize: '14px',
+                cursor: currentPage === 0 ? 'not-allowed' : 'pointer',
+                opacity: currentPage === 0 ? 0.5 : 1,
+                border: '1px solid grey',
+                backgroundColor: '#fff',
+                color: 'grey',
+                borderRadius: '4px'
+              }}
+            >
+              →
+            </button> */}
+          </div>
+
           <div className="filters">
             <select onChange={(e) => setTypeFilter(e.target.value)}>
               <option value="all">All types</option>
@@ -124,7 +196,7 @@ export default function App() {
         <div style={{ overflowX: "auto" }}>
           <table>
             <thead>
-              <tr><th>Signal</th><th>Material</th><th>Plant</th><th>Month</th><th>Urgency</th><th>Score</th><th>Detail</th><th>Actions</th></tr>
+              <tr><th>Signal</th><th>Material</th><th>Plant</th><th>Date</th><th>Urgency</th><th>Score</th><th>Detail</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {signals.map((s) => (
@@ -147,9 +219,11 @@ export default function App() {
 }
 
 function Row({ s, expanded, onToggle }) {
+  console.log('Row', s)
   const [orders, setOrders] = useState(null);
 
   useEffect(() => {
+    console.log('get orders use Effect')
     if (expanded && !orders) {
       getOrders({ material: s.material, plant: s.plant, salesOffice: s.salesOffice }).then(setOrders);
     }

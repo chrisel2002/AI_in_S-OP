@@ -14,12 +14,15 @@ export const parseSentence = (sentence) =>
     body: JSON.stringify({ sentence }),
   }).then(json);
 
-export const createRule = (rule) =>
+export const createRule = (rule) => {
+  console.log('create rule', rule)
+  return (
   fetch("/api/rules", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(rule),
-  }).then(json);
+  }).then(json))
+}
 
 export const updateRule = (id, rule) =>
   fetch(`/api/rules/${id}`, {

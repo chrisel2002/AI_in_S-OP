@@ -24,9 +24,12 @@ const labelFor = (obj, val, fallback) =>
   Object.keys(obj).find((k) => obj[k] === val) || fallback;
 
 export default function RuleBuilder({ existing, onClose, onSaved }) {
+  console.log('existing Rule', existing)
   const [sentence, setSentence] = useState(existing?.raw_sentence || "");
   const [draft, setDraft] = useState(existing || null);
   const [loading, setLoading] = useState(false);
+
+   console.log('draft', draft)
 
   async function generate() {
     if (!sentence.trim()) return;
@@ -41,6 +44,7 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
   }
 
   async function save() {
+    console.log('save func..')
     if (existing?._id) await updateRule(existing._id, draft);
     else await createRule(draft);
     onSaved();
@@ -68,27 +72,28 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
         </button>
 
         {/* Step 4-5: editable card */}
-        {draft && (
+        {/* {draft && ( */}
           <>
             <hr style={{ margin: "16px 0", border: "none", borderTop: "1px solid var(--border)" }} />
             <div className="field">
               <label>Rule name</label>
-              <input value={draft.name} onChange={(e) => set("name", e.target.value)} />
+              <input value={draft && draft.name} onChange={(e) => set("name", e.target.value)} />
             </div>
             <div className="grid-2">
               <div className="field">
                 <label>Metric</label>
                 <select
-                  value={labelFor(METRICS, draft.metric, Object.keys(METRICS)[0])}
+                  value={labelFor(METRICS, draft && draft.metric, Object.keys(METRICS)[0])}
                   onChange={(e) => set("metric", METRICS[e.target.value])}
                 >
                   {Object.keys(METRICS).map((k) => <option key={k}>{k}</option>)}
+                  {/* {Object.values(METRICS).map((c) => <option key={c}>{c}</option>)} */}
                 </select>
               </div>
               <div className="field">
                 <label>Compare as</label>
                 <select
-                  value={labelFor(COMPARISONS, draft.comparison_type, Object.keys(COMPARISONS)[0])}
+                  value={labelFor(COMPARISONS, draft && draft.comparison_type, Object.keys(COMPARISONS)[0])}
                   onChange={(e) => set("comparison_type", COMPARISONS[e.target.value])}
                 >
                   {Object.keys(COMPARISONS).map((k) => <option key={k}>{k}</option>)}
@@ -99,7 +104,7 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
               <div className="field">
                 <label>Condition</label>
                 <select
-                  value={labelFor(OPERATORS, draft.operator, "is greater than")}
+                  value={labelFor(OPERATORS, draft && draft.operator, "is greater than")}
                   onChange={(e) => set("operator", OPERATORS[e.target.value])}
                 >
                   {Object.keys(OPERATORS).map((k) => <option key={k}>{k}</option>)}
@@ -109,22 +114,26 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
                 <label>Threshold</label>
                 <input
                   type="number"
-                  value={draft.threshold}
-                  onChange={(e) => set("threshold", parseFloat(e.target.value) || 0)}
+                  value={draft && draft.threshold}
+                  // onChange={(e) => set("threshold", parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                    const value = e.target.value;
+                    set("threshold", value === "" ? "" : parseFloat(value))}}
                 />
               </div>
             </div>
-            {draft.comparison_type === "percent_change" && (
+            {draft && draft.comparison_type === "percent_change" && (
               <div className="field">
                 <label>Baseline column</label>
-                <select value={draft.baseline || ""} onChange={(e) => set("baseline", e.target.value)}>
-                  {Object.values(METRICS).map((c) => <option key={c}>{c}</option>)}
+                <select value={draft && draft.baseline || ""} onChange={(e) => set("baseline", e.target.value)}>
+                   {/* {Object.values(METRICS).map((c) => <option key={c}>{c}</option>)} */}
+                  {Object.keys(METRICS).map((k) => <option key={k}>{k}</option>)}
                 </select>
               </div>
             )}
             <div className="field">
               <label>Severity</label>
-              <select value={draft.severity} onChange={(e) => set("severity", e.target.value)}>
+              <select value={draft && draft.severity} onChange={(e) => set("severity", e.target.value)}>
                 {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
               </select>
             </div>
@@ -134,7 +143,7 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
               <button className="btn btn-primary" onClick={save}>💾 Save rule</button>
             </div>
           </>
-        )}
+        {/* )} */}
 
         {!draft && (
           <div className="modal-actions">

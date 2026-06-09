@@ -22,6 +22,14 @@ const ratioScore = (ratio) =>
 function comboKey(r) {
   return `${r.material}|${r.plant}|${r.sales_office}`;
 }
+const METRICS = {
+  "sales_free_stock_in_tons": "Forecast sales (free stock)",
+  "sales_contracts_in_tons": "Forecast sales (contracts)",
+  "sales_scheduling_agreement_in_tons": "Forecast sales (scheduling agreement)",
+  "historic_inventory_12_free_stock_in_tons": "Inventory 12mo (free stock)",
+  "historic_sales_12_free_stock_in_tons": "Historic sales 12mo (free stock)",
+  "historic_sales_24_free_stock_in_tons": "Historic sales 24mo (free stock)",
+};
 
 function groupByCombo(rows) {
   const map = new Map();
@@ -168,6 +176,7 @@ function detectCustomRule(months, rule) {
   for (const r of months) {
     let value = r[rule.metric];
     if (value === undefined) continue;
+    // if baseline parameter is present
     if (rule.comparison_type === "percent_change" && rule.baseline) {
       const base = r[rule.baseline];
       if (!base) continue;
@@ -185,7 +194,7 @@ function detectCustomRule(months, rule) {
     month: r.date,
     score,
     priority: PRIORITY(score),
-    detail: `${rule.metric} ${rule.operator} ${rule.threshold} → ${value.toFixed(2)}`,
+    detail: `${METRICS[rule.metric]} ${rule.operator} ${rule.threshold} → ${value.toFixed(2)}`,
     reasoning: rule.raw_sentence || `Custom rule: ${rule.metric} ${rule.operator} ${rule.threshold}.`,
     actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
   });
