@@ -2,35 +2,37 @@
 import { useEffect, useState } from "react";
 import { getDashboard, getRules, deleteRule, getOrders } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const typePill = {
-  "Stockout risk":      "pill-red",
-  "Demand drop":        "pill-amber",
-  "Demand surge":       "pill-blue",
+  "Stockout risk": "pill-red",
+  "Demand drop": "pill-amber",
+  "Demand surge": "pill-blue",
   "Forecast deviation": "pill-teal",
-  "New demand":         "pill-teal",
+  "New demand": "pill-teal",
 };
 const urgencyPill = { High: "pill-red", Medium: "pill-amber", Low: "pill-teal" };
-const barClass    = (s) => (s >= 85 ? "bar-high" : s >= 60 ? "bar-med" : "bar-low");
+const barClass = (s) => (s >= 85 ? "bar-high" : s >= 60 ? "bar-med" : "bar-low");
 
 // Color per signal type — index maps to a CSS class on the fill span
 const TYPE_COLOR_CLASS = {
-  "Demand surge":           "fill-blue",
+  "Demand surge": "fill-yellow",
   "Low Inventory Coverage": "fill-red",
-  "Stockout risk":          "fill-red",
-  "Demand drop":            "fill-amber",
-  "Forecast deviation":     "fill-teal",
-  "New demand":             "fill-purple",
+  "Stockout risk": "fill-red",
+  "Demand drop": "fill-amber",
+  "Forecast deviation": "fill-teal",
+  "New demand": "fill-purple",
+
 };
-const FALLBACK_FILL_CLASSES = ["fill-blue","fill-red","fill-amber","fill-teal","fill-purple","fill-orange"];
+const FALLBACK_FILL_CLASSES = ["fill-blue", "fill-red", "fill-amber", "fill-teal", "fill-purple", "fill-orange"];
 
 // Color per score bucket
 const BUCKET_COLOR_CLASS = {
-  "0–30":  "fill-teal",
+  "0–30": "fill-teal",
   "31–50": "fill-blue",
   "51–70": "fill-amber",
   "71–90": "fill-orange",
-  "90+":   "fill-red",
+  "90+": "fill-red",
 };
 
 function BarChart({ data, colorClassMap, fallbackClasses }) {
@@ -61,20 +63,22 @@ function BarChart({ data, colorClassMap, fallbackClasses }) {
 }
 
 export default function App() {
-  const [dash, setDash]               = useState(null);
-  const [rules, setRules]             = useState([]);
-  const [typeFilter, setTypeFilter]   = useState("all");
+  const [dash, setDash] = useState(null);
+  const [rules, setRules] = useState([]);
+  const [typeFilter, setTypeFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [builder, setBuilder] = useState(null); // null | {} | existingRule
   const [expanded, setExpanded] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
+  const itemsPerPage = 100;
 
-  async function refresh() {
-    const [d, r] = await Promise.all([getDashboard(), getRules()]);
+  async function refresh(page = 0) {
+    const [d, r] = await Promise.all([getDashboard({ page, pageSize: itemsPerPage }), getRules()]);
     setDash(d);
     setRules(r);
+    setCurrentPage(page);
   }
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(0); }, []);
 
   if (!dash) return <div className="db">Loading dashboard…</div>;
 
@@ -88,27 +92,23 @@ export default function App() {
   const k = dash.kpis;
 
   const handleNext = () => {
-    const nextPage = currentPage + 1;
-    setCurrentPage(nextPage);
-    fetchData(nextPage);
+    if (!dash || dash.page >= dash.totalPages - 1) return;
+    refresh(dash.page + 1);
   };
 
   // Handle previous button
   const handlePrev = () => {
-    if (currentPage > 0) {
-      const prevPage = currentPage - 1;
-      setCurrentPage(prevPage);
-      fetchData(prevPage);
-    }
+    if (!dash || dash.page <= 0) return;
+    refresh(dash.page - 1);
   };
 
-  const itemsPerPage = 100;
-
-  // Calculate skip and limit
-  const skip = currentPage * itemsPerPage;
-  const limit = itemsPerPage;
-  const rangeStart = currentPage * itemsPerPage;
-  const rangeEnd = rangeStart + itemsPerPage - 1;
+  const page = dash.page ?? currentPage;
+  const totalPages = dash.totalPages ?? 1;
+  const pageSize = dash.pageSize ?? itemsPerPage;
+  const rangeStart = dash.signals.length ? page * pageSize : 0;
+  const rangeEnd = dash.signals.length ? rangeStart + dash.signals.length - 1 : 0;
+  const displayStart = dash.signals.length ? rangeStart + 1 : 0;
+  const displayEnd = dash.signals.length ? rangeEnd + 1 : 0;
 
   return (
     <div className="db">
@@ -196,56 +196,62 @@ export default function App() {
       {/* signal table */}
       <div className="card">
         <div className="table-header-row">
-          <div className="card-title" style={{ margin: 0 }}>
-            Signal table — prioritised ({rangeStart + 1}-{rangeEnd + 1})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div className="card-title" style={{ margin: 0 }}>
+              Signal table — prioritised ({displayStart}-{displayEnd}) of {dash.kpis.total}
+            </div>
+            <div className="card-title">
+              Page {page + 1} of {totalPages}
+            </div>
+          </div>
 
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: 'space-between',
             gap: '20px',
             marginTop: '30px',
             padding: '20px',
-            borderTop: '1px solid #ccc'
           }}>
-            {/* Previous Arrow */}
-            {/* <button
-              onClick={handlePrev}
-              disabled={currentPage === 0}
-              style={{
-                padding: '5px 8px',
-                fontSize: '14px',
-                cursor: currentPage === 0 ? 'not-allowed' : 'pointer',
-                opacity: currentPage === 0 ? 0.5 : 1,
-                border: '1px solid grey',
-                backgroundColor: '#fff',
-                color: 'grey',
-                borderRadius: '4px'
-              }}
-            >
-              ←
-            </button> */}
-
-            {/* Next Arrow */}
-            {/* <button
-              onClick={handleNext}
-              style={{
-                padding: '5px 8px',
-                fontSize: '14px',
-                cursor: currentPage === 0 ? 'not-allowed' : 'pointer',
-                opacity: currentPage === 0 ? 0.5 : 1,
-                border: '1px solid grey',
-                backgroundColor: '#fff',
-                color: 'grey',
-                borderRadius: '4px'
-              }}
-            >
-              →
-            </button> */}
-          
           </div>
 
           <div className="filters">
+            <div>
+              <button
+                onClick={handlePrev}
+                disabled={!dash || page === 0}
+                style={{
+                  padding: '5px 8px',
+                  fontSize: '10px',
+                  cursor: page === 0 ? 'not-allowed' : 'pointer',
+                  opacity: page === 0 ? 0.5 : 1,
+                  border: '1px solid grey',
+                  backgroundColor: '#fff',
+                  color: 'grey',
+                  borderRadius: '4px'
+                }}
+                disabled={!dash || page === 0}>
+                <ChevronLeft size={18} />
+              </button>
+
+              <button
+                onClick={handleNext}
+                disabled={!dash || page >= totalPages - 1}
+                style={{
+                  padding: '5px 8px',
+                  fontSize: '10px',
+                  cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer',
+                  opacity: page >= totalPages - 1 ? 0.5 : 1,
+                  border: '1px solid grey',
+                  backgroundColor: '#fff',
+                  color: 'grey',
+                  borderRadius: '4px',
+                  marginLeft: '8px'
+                }}>
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
             <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setExpanded(null); }}>
               <option value="all">All types</option>
               {Object.keys(dash.byType).map((t) => <option key={t} value={t}>{t}</option>)}
@@ -308,9 +314,9 @@ function Row({ s, expanded, onToggle }) {
     }
   }, [expanded]);
 
-  const pillClass      = typePill[s.type] || "pill-blue";
-  const scoreBarClass  = barClass(s.score);
-  const scoreBadge     = s.score >= 85 ? "score-badge-high" : s.score >= 60 ? "score-badge-med" : "score-badge-low";
+  const pillClass = typePill[s.type] || "pill-blue";
+  const scoreBarClass = barClass(s.score);
+  const scoreBadge = s.score >= 85 ? "score-badge-high" : s.score >= 60 ? "score-badge-med" : "score-badge-low";
 
   return (
     <>

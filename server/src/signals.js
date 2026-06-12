@@ -209,7 +209,7 @@ export function detectSignals(rows, customRules = []) {
   return signals;
 }
 
-export function buildDashboard(signals, rulesActive) {
+export function buildDashboard(signals, rulesActive, { page = 0, pageSize = 100 } = {}) {
   const byType = {};
   const byBucket = { "0–30": 0, "31–50": 0, "51–70": 0, "71–90": 0, "90+": 0 };
   for (const s of signals) {
@@ -221,15 +221,24 @@ export function buildDashboard(signals, rulesActive) {
     else if (sc <= 90) byBucket["71–90"]++;
     else byBucket["90+"]++;
   }
+
+  const totalSignals = signals.length;
+  const totalPages = Math.max(1, Math.ceil(totalSignals / pageSize));
+  const currentPage = Math.min(Math.max(page, 0), totalPages - 1);
+  const pagedSignals = signals.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
+
   return {
     kpis: {
-      total: signals.length,
+      total: totalSignals,
       critical: signals.filter((s) => s.score >= 85).length,
       medium: signals.filter((s) => s.score >= 60 && s.score < 85).length,
       rulesActive,
     },
     byType,
     byBucket,
-    signals: signals.slice(0, 100),
+    signals: pagedSignals,
+    page: currentPage,
+    pageSize,
+    totalPages,
   };
 }

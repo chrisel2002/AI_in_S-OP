@@ -1,7 +1,8 @@
 // Thin wrapper around the backend REST API. The Vite dev server proxies /api -> :4000.
 const json = (r) => r.json();
 
-export const getDashboard = () => fetch("/api/dashboard").then(json);
+export const getDashboard = ({ page = 0, pageSize = 100 } = {}) =>
+  fetch(`/api/dashboard?page=${page}&pageSize=${pageSize}`).then(json);
 export const getRules = () => fetch("/api/rules").then(json);
 
 export const getOrders = ({ material, plant, salesOffice }) =>

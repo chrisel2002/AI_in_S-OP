@@ -27,7 +27,14 @@ app.use(express.json());
 app.get("/api/dashboard", async (req, res) => {
   const rules = await listRules();
   const signals = detectSignals(getRows(), rules);
-  const dash = buildDashboard(signals, rules.filter((r) => r.active !== false).length);
+  const rawPage = Number.parseInt(req.query.page, 10);
+  const rawPageSize = Number.parseInt(req.query.pageSize, 10);
+  const page = Number.isFinite(rawPage) && rawPage >= 0 ? rawPage : 0;
+  const pageSize = Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.min(rawPageSize, 200) : 100;
+  const dash = buildDashboard(signals, rules.filter((r) => r.active !== false).length, {
+    page,
+    pageSize,
+  });
   res.json({
     ...dash,
     briefing: generateBriefing(signals),
