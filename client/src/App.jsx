@@ -115,7 +115,7 @@ export default function App() {
       {/* top bar */}
       <div className="topbar">
         <div>
-          <div className="topbar-title">📊 S&amp;OP Signal Dashboard</div>
+          <div className="topbar-title">📊 S&amp;OP Signaling System</div>
           <div className="topbar-meta">
             Planning cycle 2026-06 · {k.rulesActive} active custom rules ·
             {/* storage: {dash.storage === "mongo" ? "MongoDB ✅" : "local file ⚠️"} */}
