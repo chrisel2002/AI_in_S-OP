@@ -126,7 +126,7 @@ export default function App() {
 
       {/* AI briefing */}
       <div className="briefing">
-        <div className="briefing-header">✨ AI briefing</div>
+        <div className="briefing-header">✨ Signals Briefing</div>
         <div className="briefing-text">{dash.briefing}</div>
       </div>
 

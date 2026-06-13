@@ -143,7 +143,6 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
               <button className="btn btn-primary" onClick={save}>💾 Save rule</button>
             </div>
           </>
-        {/* )} */}
 
         {!draft && (
           <div className="modal-actions">
