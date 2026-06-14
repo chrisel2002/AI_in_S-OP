@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+
+# Node
+node_modules/
+
+# Secrets / local config
+
+# Python
+__pycache__/
+*.pyc
+
+# Local editor/tooling
+.claude/
