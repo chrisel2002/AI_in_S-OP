@@ -33,3 +33,22 @@ export const updateRule = (id, rule) =>
   }).then(json);
 
 export const deleteRule = (id) => fetch(`/api/rules/${id}`, { method: "DELETE" }).then(json);
+
+// AI: LLM-generated executive briefing of the current signals (on demand)
+export const getAiBriefing = () => fetch("/api/briefing").then(json);
+
+// AI: contextual suggested actions for one signal
+export const suggestActions = (signal) =>
+  fetch("/api/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(signal),
+  }).then(json);
+
+// AI: chatbot answering questions grounded in the live data
+export const askChat = (question, history) =>
+  fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history }),
+  }).then(json);

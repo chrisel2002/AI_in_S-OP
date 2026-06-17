@@ -5,8 +5,10 @@ import mongoose from "mongoose";
 
 import { loadDataFromMongo, getRows } from "./data.js";
 import { detectSignals, buildDashboard } from "./signals.js";
-import { generateBriefing } from "./briefing.js";
+import { generateBriefing, generateBriefingLLM } from "./briefing.js";
 import { parseSentence } from "./parser.js";
+import { suggestActions } from "./suggest.js";
+import { buildChatContext, answerQuestion } from "./chat.js";
 import {
   initStore,
   storageBackend,
@@ -95,10 +97,49 @@ app.get("/api/orders", async (req, res) => {
 });
 
 // --- natural language -> rule draft -------------------------------------
-app.post("/api/parse", (req, res) => {
+app.post("/api/parse", async (req, res) => {
   const { sentence } = req.body;
   if (!sentence) return res.status(400).json({ error: "sentence required" });
-  res.json(parseSentence(sentence));
+  res.json(await parseSentence(sentence));
+});
+
+// --- AI briefing: LLM executive summary of the current signals (on demand) ---
+app.get("/api/briefing", async (_req, res) => {
+  const rules = await listRules();
+  const signals = detectSignals(getRows(), rules);
+  res.json({ briefing: await generateBriefingLLM(signals) });
+});
+
+// --- AI chatbot: answer questions grounded in the live data context ----------
+app.post("/api/chat", async (req, res) => {
+  const { question, history } = req.body || {};
+  if (!question) return res.status(400).json({ error: "question required" });
+  const rules = await listRules();
+  const signals = detectSignals(getRows(), rules);
+  const context = buildChatContext(getRows(), signals, rules);
+  res.json({ answer: await answerQuestion(question, context, history || []) });
+});
+
+// --- AI suggested actions for one signal, grounded in its underlying orders ---
+app.post("/api/suggest", async (req, res) => {
+  const signal = req.body || {};
+  let orderSummary = null;
+  if (storageBackend() === "mongo" && signal.material != null) {
+    const coll = mongoose.connection.db.collection("underlying_sales");
+    const match = {
+      material: Number(signal.material),
+      sales_office: Number(signal.salesOffice),
+      $or: [{ simulated_plant: Number(signal.plant) }, { historic_plant: Number(signal.plant) }],
+    };
+    const [agg] = await coll
+      .aggregate([
+        { $match: match },
+        { $group: { _id: null, orders: { $sum: 1 }, totalTons: { $sum: "$quantity_in_tons" }, customers: { $addToSet: "$customer" } } },
+      ])
+      .toArray();
+    if (agg) orderSummary = { orders: agg.orders, totalTons: agg.totalTons, customers: agg.customers.length };
+  }
+  res.json({ actions: await suggestActions(signal, orderSummary) });
 });
 
 // --- rule CRUD ----------------------------------------------------------

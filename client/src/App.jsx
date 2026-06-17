@@ -1,7 +1,8 @@
 
 import { useEffect, useState } from "react";
-import { getDashboard, getRules, deleteRule, getOrders } from "./api.js";
+import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
+import Chat from "./Chat.jsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const typePill = {
@@ -70,7 +71,19 @@ export default function App() {
   const [builder, setBuilder] = useState(null); // null | {} | existingRule
   const [expanded, setExpanded] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
+  const [aiBriefing, setAiBriefing] = useState(null);
+  const [briefingLoading, setBriefingLoading] = useState(false);
   const itemsPerPage = 100;
+
+  async function regenerateBriefing() {
+    setBriefingLoading(true);
+    try {
+      const r = await getAiBriefing();
+      setAiBriefing(r.briefing);
+    } finally {
+      setBriefingLoading(false);
+    }
+  }
 
   async function refresh(page = 0) {
     const [d, r] = await Promise.all([getDashboard({ page, pageSize: itemsPerPage }), getRules()]);
@@ -126,8 +139,13 @@ export default function App() {
 
       {/* AI briefing */}
       <div className="briefing">
-        <div className="briefing-header">✨ Signals Briefing</div>
-        <div className="briefing-text">{dash.briefing}</div>
+        <div className="briefing-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>✨ Signals Briefing{aiBriefing ? " — AI generated" : ""}</span>
+          <button className="link-btn" onClick={regenerateBriefing} disabled={briefingLoading}>
+            {briefingLoading ? "Generating…" : "✨ Regenerate with AI"}
+          </button>
+        </div>
+        <div className="briefing-text">{aiBriefing || dash.briefing}</div>
       </div>
 
       {/* KPI cards */}
@@ -299,18 +317,26 @@ export default function App() {
           onSaved={() => { setBuilder(null); refresh(); }}
         />
       )}
+
+      <Chat />
     </div>
   );
 }
 
 function Row({ s, expanded, onToggle }) {
-  console.log('Row', s)
   const [orders, setOrders] = useState(null);
+  const [aiActions, setAiActions] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
-    console.log('get orders use Effect')
     if (expanded && !orders) {
       getOrders({ material: s.material, plant: s.plant, salesOffice: s.salesOffice }).then(setOrders);
+    }
+    if (expanded && aiActions === null && !aiLoading) {
+      setAiLoading(true);
+      suggestActions(s)
+        .then((r) => setAiActions(r?.actions || ""))
+        .finally(() => setAiLoading(false));
     }
   }, [expanded]);
 
@@ -342,7 +368,8 @@ function Row({ s, expanded, onToggle }) {
           <td colSpan={8} style={{ padding: 0 }}>
             <div className="action-panel">
               <b>Reasoning:</b> {s.reasoning}{"\n\n"}
-              <b>AI-suggested actions:</b>{"\n"}{s.actions}
+              <b>AI-suggested actions:</b>{"\n"}
+              {aiLoading ? "Generating with AI…" : (aiActions || s.actions)}
             </div>
             <Drilldown orders={orders} />
           </td>
