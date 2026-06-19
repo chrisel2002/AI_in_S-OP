@@ -1,5 +1,4 @@
-
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
@@ -15,7 +14,6 @@ const typePill = {
 const urgencyPill = { High: "pill-red", Medium: "pill-amber", Low: "pill-teal" };
 const barClass = (s) => (s >= 85 ? "bar-high" : s >= 60 ? "bar-med" : "bar-low");
 
-// Color per signal type — index maps to a CSS class on the fill span
 const TYPE_COLOR_CLASS = {
   "Demand surge": "fill-yellow",
   "Low Inventory Coverage": "fill-red",
@@ -23,11 +21,9 @@ const TYPE_COLOR_CLASS = {
   "Demand drop": "fill-amber",
   "Forecast deviation": "fill-teal",
   "New demand": "fill-purple",
-
 };
 const FALLBACK_FILL_CLASSES = ["fill-blue", "fill-red", "fill-amber", "fill-teal", "fill-purple", "fill-orange"];
 
-// Color per score bucket
 const BUCKET_COLOR_CLASS = {
   "0–30": "fill-teal",
   "31–50": "fill-blue",
@@ -68,12 +64,15 @@ export default function App() {
   const [rules, setRules] = useState([]);
   const [typeFilter, setTypeFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
-  const [builder, setBuilder] = useState(null); // null | {} | existingRule
+  const [builder, setBuilder] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [aiBriefing, setAiBriefing] = useState(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const itemsPerPage = 100;
+
+  // Ref so refresh() always reads the latest typeFilter without stale closure
+  const typeFilterRef = useRef("all");
 
   async function regenerateBriefing() {
     setBriefingLoading(true);
@@ -85,53 +84,67 @@ export default function App() {
     }
   }
 
-  async function refresh(page = 0) {
-    const [d, r] = await Promise.all([getDashboard({ page, pageSize: itemsPerPage }), getRules()]);
+  async function refresh(page = 0, type = typeFilterRef.current) {
+    const [d, r] = await Promise.all([
+      getDashboard({ page, pageSize: itemsPerPage, type }),
+      getRules(),
+    ]);
     setDash(d);
     setRules(r);
     setCurrentPage(page);
   }
-  useEffect(() => { refresh(0); }, []);
+
+  useEffect(() => { refresh(0, "all"); }, []);
 
   if (!dash) return <div className="db">Loading dashboard…</div>;
 
-  console.log('dash', dash)
-
-  const signals = dash.signals.filter(
-    (s) =>
-      (typeFilter === "all" || s.type === typeFilter) &&
-      (urgencyFilter === "all" || s.priority === urgencyFilter)
+  // dash.signals is already type-filtered by the server.
+  // Only apply urgency filter client-side.
+  const filteredSignals = dash.signals.filter(
+    (s) => urgencyFilter === "all" || s.priority === urgencyFilter
   );
+
   const k = dash.kpis;
+
+  const handleTypeChange = (newType) => {
+    typeFilterRef.current = newType;
+    setTypeFilter(newType);
+    setUrgencyFilter("all");
+    setExpanded(null);
+    refresh(0, newType);
+  };
 
   const handleNext = () => {
     if (!dash || dash.page >= dash.totalPages - 1) return;
-    refresh(dash.page + 1);
+    refresh(dash.page + 1, typeFilterRef.current);
   };
 
-  // Handle previous button
   const handlePrev = () => {
     if (!dash || dash.page <= 0) return;
-    refresh(dash.page - 1);
+    refresh(dash.page - 1, typeFilterRef.current);
   };
 
   const page = dash.page ?? currentPage;
   const totalPages = dash.totalPages ?? 1;
   const pageSize = dash.pageSize ?? itemsPerPage;
   const rangeStart = dash.signals.length ? page * pageSize : 0;
-  const rangeEnd = dash.signals.length ? rangeStart + dash.signals.length - 1 : 0;
   const displayStart = dash.signals.length ? rangeStart + 1 : 0;
-  const displayEnd = dash.signals.length ? rangeEnd + 1 : 0;
+  const displayEnd = dash.signals.length ? rangeStart + dash.signals.length : 0;
+
+  // Build dropdown options: byType (all signals) + any custom rule names not yet producing signals
+  const dropdownTypes = [
+    ...Object.keys(dash.byType),
+    ...rules.map((r) => r.name).filter((n) => n && !dash.byType[n]),
+  ];
 
   return (
     <div className="db">
       {/* top bar */}
       <div className="topbar">
         <div>
-          <div className="topbar-title">📊 S&amp;OP Signaling System</div>
+          <div className="topbar-title">📊 S&amp;OP Signal Dashboard</div>
           <div className="topbar-meta">
             Planning cycle 2026-06 · {k.rulesActive} active custom rules ·
-            {/* storage: {dash.storage === "mongo" ? "MongoDB ✅" : "local file ⚠️"} */}
           </div>
         </div>
         <button className="btn btn-primary" onClick={() => setBuilder({})}>+ Add rule</button>
@@ -203,7 +216,13 @@ export default function App() {
                 </div>
                 <div className="row-gap">
                   <button className="link-btn" onClick={() => setBuilder(r)}>Edit</button>
-                  <button className="link-btn" onClick={async () => { await deleteRule(r._id); refresh(); }}>Delete</button>
+                  <button className="link-btn" onClick={async () => {
+                    await deleteRule(r._id);
+                    const nextType = typeFilterRef.current === r.name ? "all" : typeFilterRef.current;
+                    typeFilterRef.current = nextType;
+                    setTypeFilter(nextType);
+                    refresh(0, nextType);
+                  }}>Delete</button>
                 </div>
               </div>
             ))}
@@ -214,23 +233,13 @@ export default function App() {
       {/* signal table */}
       <div className="card">
         <div className="table-header-row">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <div className="card-title" style={{ margin: 0 }}>
-              Signal table — prioritised ({displayStart}-{displayEnd}) of {dash.kpis.total}
+              Signal table — prioritised ({displayStart}–{displayEnd}) of {k.total}
             </div>
             <div className="card-title">
               Page {page + 1} of {totalPages}
             </div>
-          </div>
-
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '20px',
-            marginTop: '30px',
-            padding: '20px',
-          }}>
           </div>
 
           <div className="filters">
@@ -239,41 +248,33 @@ export default function App() {
                 onClick={handlePrev}
                 disabled={!dash || page === 0}
                 style={{
-                  padding: '5px 8px',
-                  fontSize: '10px',
-                  cursor: page === 0 ? 'not-allowed' : 'pointer',
+                  padding: "5px 8px", fontSize: "10px",
+                  cursor: page === 0 ? "not-allowed" : "pointer",
                   opacity: page === 0 ? 0.5 : 1,
-                  border: '1px solid grey',
-                  backgroundColor: '#fff',
-                  color: 'grey',
-                  borderRadius: '4px'
-                }}
-                disabled={!dash || page === 0}>
+                  border: "1px solid grey", backgroundColor: "#fff",
+                  color: "grey", borderRadius: "4px",
+                }}>
                 <ChevronLeft size={18} />
               </button>
-
               <button
                 onClick={handleNext}
                 disabled={!dash || page >= totalPages - 1}
                 style={{
-                  padding: '5px 8px',
-                  fontSize: '10px',
-                  cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer',
+                  padding: "5px 8px", fontSize: "10px",
+                  cursor: page >= totalPages - 1 ? "not-allowed" : "pointer",
                   opacity: page >= totalPages - 1 ? 0.5 : 1,
-                  border: '1px solid grey',
-                  backgroundColor: '#fff',
-                  color: 'grey',
-                  borderRadius: '4px',
-                  marginLeft: '8px'
+                  border: "1px solid grey", backgroundColor: "#fff",
+                  color: "grey", borderRadius: "4px", marginLeft: "8px",
                 }}>
                 <ChevronRight size={18} />
               </button>
             </div>
 
-            <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setExpanded(null); }}>
+            <select value={typeFilter} onChange={(e) => handleTypeChange(e.target.value)}>
               <option value="all">All types</option>
-              {Object.keys(dash.byType).map((t) => <option key={t} value={t}>{t}</option>)}
+              {dropdownTypes.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+
             <select value={urgencyFilter} onChange={(e) => { setUrgencyFilter(e.target.value); setExpanded(null); }}>
               <option value="all">All urgency</option>
               <option value="High">High</option>
@@ -283,7 +284,7 @@ export default function App() {
           </div>
         </div>
 
-        {signals.length === 0 ? (
+        {filteredSignals.length === 0 ? (
           <div className="empty-state">No signals match the current filters.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -296,7 +297,7 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {signals.map((s) => (
+                {filteredSignals.map((s) => (
                   <Row
                     key={s.id}
                     s={s}
@@ -314,7 +315,17 @@ export default function App() {
         <RuleBuilder
           existing={builder._id ? builder : null}
           onClose={() => setBuilder(null)}
-          onSaved={() => { setBuilder(null); refresh(); }}
+          onSaved={(savedName) => {
+            setBuilder(null);
+            if (savedName && !builder._id) {
+              typeFilterRef.current = savedName;
+              setTypeFilter(savedName);
+              setUrgencyFilter("all");
+              refresh(0, savedName);
+            } else {
+              refresh(0, typeFilterRef.current);
+            }
+          }}
         />
       )}
 

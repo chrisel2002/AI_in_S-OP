@@ -4,13 +4,13 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
 const MIN_TONS = 5;
 
-
 const ratioScore = (ratio) =>
   clamp(Math.round(40 + 20 * Math.log2(1 + Math.abs(ratio))), 40, 100);
 
 function comboKey(r) {
   return `${r.material}|${r.plant}|${r.sales_office}`;
 }
+
 const METRICS = {
   "sales_free_stock_in_tons": "Forecast sales (free stock)",
   "sales_contracts_in_tons": "Forecast sales (contracts)",
@@ -19,6 +19,17 @@ const METRICS = {
   "historic_sales_12_free_stock_in_tons": "Historic sales 12mo (free stock)",
   "historic_sales_24_free_stock_in_tons": "Historic sales 24mo (free stock)",
 };
+
+// Reverse map: label → column key (to handle rules saved with old label-based baseline)
+const LABEL_TO_COL = Object.fromEntries(
+  Object.entries(METRICS).map(([col, label]) => [label, col])
+);
+
+function resolveColumn(val) {
+  if (!val) return null;
+  if (val in LABEL_TO_COL) return LABEL_TO_COL[val]; // old label → fix to key
+  return val; // already a column key
+}
 
 function groupByCombo(rows) {
   const map = new Map();
@@ -108,9 +119,7 @@ function detectLowInventory(months) {
   }
   if (!worst) return null;
   const { r, inv, demand } = worst;
-  // FIX: scale inventory score more carefully — low but non-zero inventory
-  // should not automatically be "High". Score 50-85 based on coverage ratio.
-  const coverage = inv / demand; // 0 = no stock, 1 = full coverage
+  const coverage = inv / demand;
   const score = inv <= 0 ? 85 : clamp(Math.round(80 - coverage * 40), 50, 85);
   return baseSignal(r, {
     type: "Stockout risk",
@@ -129,7 +138,6 @@ function detectNewDemand(months) {
     const hist = r.historic_sales_12_free_stock_in_tons + r.historic_sales_24_free_stock_in_tons;
     const plan = r.sales_free_stock_in_tons;
     if (plan >= MIN_TONS && hist === 0) {
-      // FIX: new demand is a medium-severity flag by default, not automatic High
       const score = 58;
       return baseSignal(r, {
         type: "New demand",
@@ -158,34 +166,37 @@ const OPS = {
   "==": (a, b) => a === b,
 };
 
+// Returns ALL matching rows as individual signals (not just the single worst)
 function detectCustomRule(months, rule) {
-  let worst = null;
+  const baselineCol = resolveColumn(rule.baseline);
+  const results = [];
+
   for (const r of months) {
     let value = r[rule.metric];
-    if (value === undefined) continue;
-    // if baseline parameter is present
-    if (rule.comparison_type === "percent_change" && rule.baseline) {
-      const base = r[rule.baseline];
-      if (!base) continue;
+    if (value === undefined || value === null) continue;
+
+    if (rule.comparison_type === "percent_change" && baselineCol) {
+      const base = r[baselineCol];
+      if (base === undefined || base === null || base === 0) continue;
       value = ((r[rule.metric] - base) / base) * 100;
     }
+
     const op = OPS[rule.operator] || OPS[">"];
-    if (!op(value, rule.threshold)) continue;
-    if (!worst || Math.abs(value) > Math.abs(worst.value)) worst = { r, value };
+    if (!op(value, Number(rule.threshold))) continue;
+
+    const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 65 : 50;
+    results.push(baseSignal(r, {
+      type: rule.name || "Custom rule",
+      month: r.date,
+      score,
+      priority: PRIORITY(score),
+      detail: `${METRICS[rule.metric] || rule.metric} ${rule.operator} ${rule.threshold} → ${value.toFixed(2)}`,
+      reasoning: rule.raw_sentence || `Custom rule: ${rule.metric} ${rule.operator} ${rule.threshold}.`,
+      actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
+    }));
   }
-  if (!worst) return null;
-  const { r, value } = worst;
-  const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 65 : 50;
-  return baseSignal(r, {
-    // FIX: tag signals with the rule's name so the type-filter dropdown matches
-    type: rule.name || "Custom rule",
-    month: r.date,
-    score,
-    priority: PRIORITY(score),
-    detail: `${METRICS[rule.metric]} ${rule.operator} ${rule.threshold} → ${value.toFixed(2)}`,
-    reasoning: rule.raw_sentence || `Custom rule: ${rule.metric} ${rule.operator} ${rule.threshold}.`,
-    actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
-  });
+
+  return results;
 }
 
 // ---- public API ---------------------------------------------------------
@@ -200,8 +211,8 @@ export function detectSignals(rows, customRules = []) {
     }
     for (const rule of customRules) {
       if (rule.active === false) continue;
-      const s = detectCustomRule(months, rule);
-      if (s) signals.push(s);
+      // push every matching row as its own signal
+      for (const s of detectCustomRule(months, rule)) signals.push(s);
     }
   }
   signals.sort((a, b) => b.score - a.score);
@@ -209,10 +220,13 @@ export function detectSignals(rows, customRules = []) {
   return signals;
 }
 
-export function buildDashboard(signals, rulesActive, { page = 0, pageSize = 100 } = {}) {
+export function buildDashboard(signals, rulesActive, { page = 0, pageSize = 100, allSignals = null } = {}) {
+  // byType always uses the FULL signal set so dropdown is never missing types
+  const sourceForStats = allSignals || signals;
   const byType = {};
   const byBucket = { "0–30": 0, "31–50": 0, "51–70": 0, "71–90": 0, "90+": 0 };
-  for (const s of signals) {
+
+  for (const s of sourceForStats) {
     byType[s.type] = (byType[s.type] || 0) + 1;
     const sc = s.score;
     if (sc <= 30) byBucket["0–30"]++;
@@ -229,9 +243,9 @@ export function buildDashboard(signals, rulesActive, { page = 0, pageSize = 100 
 
   return {
     kpis: {
-      total: totalSignals,
-      critical: signals.filter((s) => s.score >= 85).length,
-      medium: signals.filter((s) => s.score >= 60 && s.score < 85).length,
+      total: sourceForStats.length,   // total across ALL signals including custom
+      critical: sourceForStats.filter((s) => s.score >= 85).length,
+      medium: sourceForStats.filter((s) => s.score >= 60 && s.score < 85).length,
       rulesActive,
     },
     byType,

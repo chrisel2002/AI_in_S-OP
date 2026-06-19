@@ -20,22 +20,31 @@ const OPERATORS = {
 const COMPARISONS = { "absolute value (tons)": "absolute", "% change vs baseline": "percent_change" };
 const SEVERITIES = ["info", "warning", "critical"];
 
+// Find label key for a stored value
 const labelFor = (obj, val, fallback) =>
   Object.keys(obj).find((k) => obj[k] === val) || fallback;
 
-export default function RuleBuilder({ existing, onClose, onSaved }) {
-  console.log('existing Rule', existing)
-  const [sentence, setSentence] = useState(existing?.raw_sentence || "");
-  const [draft, setDraft] = useState(existing || null);
-  const [loading, setLoading] = useState(false);
+// Resolve a stored baseline value — might be a label (old) or column key (new)
+const resolveBaseline = (val) => {
+  if (!val) return null;
+  if (Object.values(METRICS).includes(val)) return val;   // already a column key
+  if (METRICS[val]) return METRICS[val];                  // it's a label → convert
+  return val;
+};
 
-   console.log('draft', draft)
+export default function RuleBuilder({ existing, onClose, onSaved }) {
+  const [sentence, setSentence] = useState(existing?.raw_sentence || "");
+  const [draft, setDraft] = useState(existing
+    ? { ...existing, baseline: resolveBaseline(existing.baseline) }
+    : null
+  );
+  const [loading, setLoading] = useState(false);
 
   async function generate() {
     if (!sentence.trim()) return;
     setLoading(true);
     const rule = await parseSentence(sentence);
-    setDraft(rule);
+    setDraft({ ...rule, baseline: resolveBaseline(rule.baseline) });
     setLoading(false);
   }
 
@@ -44,10 +53,17 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
   }
 
   async function save() {
-    console.log('save func..')
-    if (existing?._id) await updateRule(existing._id, draft);
-    else await createRule(draft);
-    onSaved();
+    if (!draft) return;
+    const toSave = {
+      ...draft,
+      threshold: parseFloat(draft.threshold) || 0,
+      // Ensure baseline is always stored as column key, never as label
+      baseline: resolveBaseline(draft.baseline),
+      active: true,
+    };
+    if (existing?._id) await updateRule(existing._id, toSave);
+    else await createRule(toSave);
+    onSaved(toSave.name); // pass name so App can auto-select it in the dropdown
   }
 
   return (
@@ -71,8 +87,8 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
           {loading ? "Generating…" : "✨ Generate rule"}
         </button>
 
-        {/* Step 4-5: editable card */}
-        {/* {draft && ( */}
+        {/* Step 4-5: editable card — only shown after Generate */}
+        {draft && (
           <>
             <hr style={{ margin: "16px 0", border: "none", borderTop: "1px solid var(--border)" }} />
             <div className="field">
@@ -114,35 +130,35 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
                 <label>Threshold</label>
                 <input
                   type="number"
-                  value={draft && draft.threshold}
-                  // onChange={(e) => set("threshold", parseFloat(e.target.value) || 0)}
-                    onChange={(e) => {
-                    const value = e.target.value;
-                    set("threshold", value === "" ? "" : parseFloat(value))}}
+                  value={draft.threshold ?? ""}
+                  onChange={(e) => set("threshold", e.target.value === "" ? "" : parseFloat(e.target.value))}
                 />
               </div>
             </div>
-            {draft && draft.comparison_type === "percent_change" && (
+            {draft.comparison_type === "percent_change" && (
               <div className="field">
                 <label>Baseline column</label>
-                <select value={draft && draft.baseline || ""} onChange={(e) => set("baseline", e.target.value)}>
-                   {/* {Object.values(METRICS).map((c) => <option key={c}>{c}</option>)} */}
+                <select
+                  value={labelFor(METRICS, draft.baseline, "")}
+                  onChange={(e) => set("baseline", METRICS[e.target.value])}
+                >
+                  <option value="">— select baseline —</option>
                   {Object.keys(METRICS).map((k) => <option key={k}>{k}</option>)}
                 </select>
               </div>
             )}
             <div className="field">
               <label>Severity</label>
-              <select value={draft && draft.severity} onChange={(e) => set("severity", e.target.value)}>
+              <select value={draft.severity || "warning"} onChange={(e) => set("severity", e.target.value)}>
                 {SEVERITIES.map((s) => <option key={s}>{s}</option>)}
               </select>
             </div>
-
             <div className="modal-actions">
               <button className="btn" onClick={onClose}>Cancel</button>
               <button className="btn btn-primary" onClick={save}>💾 Save rule</button>
             </div>
           </>
+        )}
 
         {!draft && (
           <div className="modal-actions">
