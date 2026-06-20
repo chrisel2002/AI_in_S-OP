@@ -118,63 +118,78 @@ tr:hover td { background: var(--surface-2); }
 
 /* ===== Signal detail panel (expanded row) ===== */
 .sig-detail {
-  display: flex; gap: 0; border-top: 2px solid var(--tk-blue);
-  background: var(--surface);
+  display: flex; border-top: 3px solid var(--tk-blue); background: var(--surface);
 }
 .sig-detail-why {
-  flex: 1; padding: 16px 20px; border-right: 1px solid var(--border);
+  flex: 1; padding: 20px 24px; border-right: 1px solid var(--border);
 }
 .sig-detail-actions {
-  width: 320px; flex-shrink: 0; padding: 16px 20px; background: var(--surface-2);
+  width: 300px; flex-shrink: 0; padding: 20px 22px; background: var(--surface-2);
 }
 .sig-detail-section-title {
-  font-size: 10px; font-weight: 700; color: var(--text-2);
-  text-transform: uppercase; letter-spacing: .07em; margin-bottom: 12px;
+  font-size: 10px; font-weight: 700; color: var(--tk-blue);
+  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 14px;
 }
 
 /* Snapshot: numbers that triggered the signal */
-.snap { display: flex; flex-direction: column; gap: 10px; }
-.snap-meta { font-size: 11.5px; color: var(--text-2); }
+.snap { display: flex; flex-direction: column; gap: 14px; }
+.snap-meta { font-size: 12px; color: var(--text-2); font-weight: 500; }
 .snap-compare {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  display: flex; align-items: stretch; gap: 12px;
 }
 .snap-col {
-  flex: 1; min-width: 100px; background: var(--surface-2);
-  border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+  flex: 1; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
 }
 .snap-col-alert {
-  background: var(--blue-bg); border-color: var(--tk-blue);
+  background: var(--blue-bg); border: 2px solid var(--tk-blue);
 }
-.snap-col-date { font-size: 10.5px; color: var(--text-2); margin-bottom: 4px; }
-.snap-col-val  { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.1; }
-.snap-col-sub  { font-size: 10.5px; color: var(--text-2); margin-top: 3px; }
-.snap-arrow    { font-size: 20px; color: var(--text-2); flex-shrink: 0; }
+.snap-col-date { font-size: 11px; color: var(--text-2); margin-bottom: 6px; font-weight: 500; }
+.snap-col-val  { font-size: 30px; font-weight: 700; color: var(--text); line-height: 1; letter-spacing: -.5px; }
+.snap-col-alert .snap-col-val { color: var(--tk-blue); }
+.snap-col-sub  { font-size: 11px; color: var(--text-2); margin-top: 6px; }
+.snap-arrow    {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; color: var(--tk-blue); flex-shrink: 0; font-weight: 700;
+  padding: 0 4px;
+}
 .snap-verdict  {
-  font-size: 12px; font-weight: 600; color: var(--tk-blue);
-  background: var(--blue-bg); border: 1px solid var(--blue-border);
-  border-radius: 6px; padding: 6px 12px; display: inline-block;
+  font-size: 12.5px; font-weight: 600; color: var(--tk-blue);
+  background: var(--blue-bg); border-left: 3px solid var(--tk-blue);
+  padding: 8px 14px; border-radius: 0 6px 6px 0;
 }
-.snap-fallback { font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
+.snap-fallback { font-size: 13px; color: var(--text-2); line-height: 1.7; }
 
 /* Formula snapshot */
 .snap-formula-code {
   font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
-  background: #1e1e1e; color: #93c5fd; padding: 10px 14px;
+  background: #1a1a1a; color: #93c5fd; padding: 10px 14px;
   border-radius: 6px; white-space: pre-wrap; word-break: break-all;
 }
-.snap-vals { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.snap-vals { display: flex; flex-direction: column; gap: 0; margin-top: 2px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .snap-val-row {
   display: flex; justify-content: space-between; align-items: center;
-  font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border);
+  font-size: 12.5px; padding: 8px 12px; border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 .snap-val-row:last-child { border-bottom: none; }
 .snap-val-label { color: var(--text-2); }
-.snap-val-num   { font-weight: 600; color: var(--text); }
+.snap-val-num   { font-weight: 700; color: var(--text); font-size: 13px; }
 
-/* Recommended actions text */
-.sig-actions-text {
-  font-size: 12.5px; line-height: 1.8; color: var(--text); white-space: pre-line;
+/* Recommended actions list */
+.action-loading { font-size: 12.5px; color: var(--text-2); font-style: italic; }
+.sig-actions-text { font-size: 12.5px; line-height: 1.8; color: var(--text); white-space: pre-line; }
+.action-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.action-list-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  font-size: 13px; line-height: 1.55; color: var(--text);
 }
+.action-num {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--tk-blue); color: #fff; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-top: 1px;
+}
+.action-text { flex: 1; }
 
 /* Orders toggle */
 .sig-orders-toggle-row {
