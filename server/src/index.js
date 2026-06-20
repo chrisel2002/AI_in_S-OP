@@ -7,6 +7,7 @@ import { loadDataFromMongo, getRows } from "./data.js";
 import { detectSignals, buildDashboard } from "./signals.js";
 import { generateBriefing, generateBriefingLLM } from "./briefing.js";
 import { parseSentence, checkPromptClarity } from "./parser.js";
+import { getAllStatuses, upsertStatus, removeStatus } from "./status.js";
 import { suggestActions } from "./suggest.js";
 import { buildChatContext, answerQuestion } from "./chat.js";
 import {
@@ -182,6 +183,27 @@ app.post("/api/suggest", async (req, res) => {
     if (agg) orderSummary = { orders: agg.orders, totalTons: agg.totalTons, customers: agg.customers.length };
   }
   res.json({ actions: await suggestActions(signal, orderSummary) });
+});
+
+// --- signal status CRUD -------------------------------------------------
+app.get("/api/signal-status", async (_req, res) => res.json(await getAllStatuses()));
+
+app.put("/api/signal-status/:key", async (req, res) => {
+  await upsertStatus(decodeURIComponent(req.params.key), req.body);
+  res.json({ ok: true });
+});
+
+app.delete("/api/signal-status/:key", async (req, res) => {
+  await removeStatus(decodeURIComponent(req.params.key));
+  res.json({ ok: true });
+});
+
+// --- all signals (unpaginated, for export) ------------------------------
+app.get("/api/signals", async (req, res) => {
+  const rules = await listRules();
+  const all = detectSignals(getRows(), rules);
+  const type = (req.query.type || "").trim();
+  res.json(type && type !== "all" ? all.filter((s) => s.type === type) : all);
 });
 
 // --- rule CRUD ----------------------------------------------------------

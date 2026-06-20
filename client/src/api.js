@@ -59,3 +59,23 @@ export const askChat = (question, history) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, history }),
   }).then(json);
+
+// Signal status tracking
+export const getSignalStatuses = () => fetch("/api/signal-status").then(json);
+
+export const setSignalStatus = (key, status, note = null) =>
+  fetch(`/api/signal-status/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, note }),
+  }).then(json);
+
+export const clearSignalStatus = (key) =>
+  fetch(`/api/signal-status/${encodeURIComponent(key)}`, { method: "DELETE" }).then(json);
+
+// All signals unpaginated — for CSV export
+export const getAllSignals = (type = "") => {
+  const params = new URLSearchParams();
+  if (type && type !== "all") params.set("type", type);
+  return fetch(`/api/signals?${params}`).then(json);
+};

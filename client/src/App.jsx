@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions } from "./api.js";
+import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions, getSignalStatuses, setSignalStatus, clearSignalStatus, getAllSignals } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -69,6 +69,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(0);
   const [aiBriefing, setAiBriefing] = useState(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
+  const [statuses, setStatuses] = useState({});
   const itemsPerPage = 100;
 
   // Ref so refresh() always reads the latest typeFilter without stale closure
@@ -94,7 +95,44 @@ export default function App() {
     setCurrentPage(page);
   }
 
-  useEffect(() => { refresh(0, "all"); }, []);
+  useEffect(() => {
+    refresh(0, "all");
+    getSignalStatuses().then(setStatuses).catch(() => {});
+  }, []);
+
+  async function handleSetStatus(key, status) {
+    await setSignalStatus(key, status);
+    setStatuses((prev) => ({ ...prev, [key]: { status } }));
+  }
+
+  async function handleClearStatus(key) {
+    await clearSignalStatus(key);
+    setStatuses((prev) => { const n = { ...prev }; delete n[key]; return n; });
+  }
+
+  async function handleExportCSV() {
+    const signals = await getAllSignals(typeFilterRef.current);
+    const briefingText = aiBriefing || dash.briefing || "";
+    const header = ["Type", "Material", "Plant", "Sales Office", "Month", "Priority", "Score", "Detail", "Status"].join(",");
+    const rows = signals.map((s) => {
+      const st = statuses[s.key]?.status || "open";
+      return [
+        `"${s.type}"`, s.material, s.plant, s.salesOffice,
+        s.month, s.priority, s.score,
+        `"${(s.detail || "").replace(/"/g, '""')}"`,
+        st,
+      ].join(",");
+    });
+    const briefingLines = briefingText.split("\n").map((l) => `# ${l}`).join("\n");
+    const csv = `# S&OP Signal Export — ${new Date().toISOString().slice(0, 10)}\n${briefingLines}\n\n${header}\n${rows.join("\n")}`;
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sop-signals-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   if (!dash) return <div className="db">Loading dashboard…</div>;
 
@@ -293,6 +331,10 @@ export default function App() {
               <option value="Medium">Medium</option>
               <option value="Low">Low</option>
             </select>
+
+            <button className="btn export-btn" onClick={handleExportCSV} title="Export all signals to CSV">
+              ↓ Export CSV
+            </button>
           </div>
         </div>
 
@@ -315,6 +357,9 @@ export default function App() {
                     s={s}
                     expanded={expanded === s.id}
                     onToggle={() => setExpanded(expanded === s.id ? null : s.id)}
+                    signalStatus={statuses[s.key]?.status || null}
+                    onSetStatus={(st) => handleSetStatus(s.key, st)}
+                    onClearStatus={() => handleClearStatus(s.key)}
                   />
                 ))}
               </tbody>
@@ -512,7 +557,7 @@ function ActionList({ text, loading }) {
   );
 }
 
-function Row({ s, expanded, onToggle }) {
+function Row({ s, expanded, onToggle, signalStatus, onSetStatus, onClearStatus }) {
   const [aiActions, setAiActions] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
@@ -546,7 +591,10 @@ function Row({ s, expanded, onToggle }) {
   return (
     <>
       <tr className="signal-row" onClick={onToggle} style={{ cursor: "pointer" }}>
-        <td><span className={`pill ${pillClass}`}>{s.type}</span></td>
+        <td>
+          <span className={`pill ${pillClass}`}>{s.type}</span>
+          {signalStatus && <span className={`status-badge status-${signalStatus}`}>{signalStatus}</span>}
+        </td>
         <td style={{ fontWeight: 500 }}>{s.material}</td>
         <td>{s.plant}</td>
         <td>{s.month}</td>
@@ -575,6 +623,28 @@ function Row({ s, expanded, onToggle }) {
                 <ActionList text={aiActions} loading={aiLoading} />
               </div>
             </div>
+            <div className="sig-status-bar">
+              <span className="sig-status-label">Mark as:</span>
+              {[
+                { key: "actioned",  label: "✓ Actioned"  },
+                { key: "snoozed",   label: "⏸ Snoozed"  },
+                { key: "escalated", label: "↑ Escalated" },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`sig-status-btn sig-status-btn-${key}${signalStatus === key ? " active" : ""}`}
+                  onClick={(e) => { e.stopPropagation(); signalStatus === key ? onClearStatus() : onSetStatus(key); }}
+                >
+                  {label}
+                </button>
+              ))}
+              {signalStatus && (
+                <button className="sig-status-btn sig-status-clear" onClick={(e) => { e.stopPropagation(); onClearStatus(); }}>
+                  ✕ Clear
+                </button>
+              )}
+            </div>
+
             <div className="sig-orders-toggle-row">
               <button className="sig-orders-toggle-btn" onClick={toggleOrders}>
                 {showOrders ? "▲ Hide underlying orders" : "▼ View underlying orders"}

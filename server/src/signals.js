@@ -288,7 +288,10 @@ export function detectSignals(rows, customRules = []) {
     }
   }
   signals.sort((a, b) => b.score - a.score);
-  signals.forEach((s, i) => (s.id = i + 1));
+  signals.forEach((s, i) => {
+    s.id = i + 1;
+    s.key = `${s.material}|${s.plant}|${s.salesOffice}|${s.type}|${s.month}`;
+  });
   return signals;
 }
 
