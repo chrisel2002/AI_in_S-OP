@@ -533,7 +533,7 @@ function Row({ s, expanded, onToggle }) {
 
   return (
     <>
-      <tr>
+      <tr className="signal-row" onClick={onToggle} style={{ cursor: "pointer" }}>
         <td><span className={`pill ${pillClass}`}>{s.type}</span></td>
         <td style={{ fontWeight: 500 }}>{s.material}</td>
         <td>{s.plant}</td>
@@ -548,7 +548,7 @@ function Row({ s, expanded, onToggle }) {
           </div>
         </td>
         <td style={{ color: "var(--text-2)" }}>{s.detail}</td>
-        <td><button className="btn" onClick={onToggle}>{expanded ? "Hide" : "Detail"}</button></td>
+        <td><button className="btn" onClick={(e) => { e.stopPropagation(); onToggle(); }}>{expanded ? "Hide" : "Detail"}</button></td>
       </tr>
       {expanded && (
         <tr>
