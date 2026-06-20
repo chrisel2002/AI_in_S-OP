@@ -481,8 +481,7 @@ function SnapshotView({ snap, s }) {
   return <p className="snap-fallback">{s.reasoning}</p>;
 }
 
-function ActionList({ text, loading }) {
-  if (loading) return <p className="action-loading">Generating with AI…</p>;
+function ActionList({ text }) {
   if (!text) return null;
   // Parse "1. Foo\n2. Bar" into individual items; fall back to plain text
   const items = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
@@ -560,7 +559,7 @@ function Row({ s, expanded, onToggle }) {
               </div>
               <div className="sig-detail-actions">
                 <div className="sig-detail-section-title">Recommended actions</div>
-                <ActionList text={aiLoading ? null : (aiActions || s.actions)} loading={aiLoading} />
+                <ActionList text={aiActions || s.actions} />
               </div>
             </div>
             <div className="sig-orders-toggle-row">
