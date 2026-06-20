@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { getDashboard, getRules, deleteRule, getAiBriefing, suggestActions } from "./api.js";
+import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -479,6 +479,9 @@ function SnapshotView({ snap, s }) {
 function Row({ s, expanded, onToggle }) {
   const [aiActions, setAiActions] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
+  const [orders, setOrders] = useState(null);
+  const [ordersLoading, setOrdersLoading] = useState(false);
 
   useEffect(() => {
     if (expanded && aiActions === null && !aiLoading) {
@@ -487,7 +490,18 @@ function Row({ s, expanded, onToggle }) {
         .then((r) => setAiActions(r?.actions || ""))
         .finally(() => setAiLoading(false));
     }
+    if (!expanded) { setShowOrders(false); setOrders(null); }
   }, [expanded]);
+
+  function toggleOrders() {
+    if (!showOrders && !orders && !ordersLoading) {
+      setOrdersLoading(true);
+      getOrders({ material: s.material, plant: s.plant, salesOffice: s.salesOffice })
+        .then(setOrders)
+        .finally(() => setOrdersLoading(false));
+    }
+    setShowOrders((v) => !v);
+  }
 
   const pillClass = typePill[s.type] || "pill-blue";
   const scoreBarClass = barClass(s.score);
@@ -527,9 +541,55 @@ function Row({ s, expanded, onToggle }) {
                 </div>
               </div>
             </div>
+            <div className="sig-orders-toggle-row">
+              <button className="sig-orders-toggle-btn" onClick={toggleOrders}>
+                {showOrders ? "▲ Hide underlying orders" : "▼ View underlying orders"}
+              </button>
+            </div>
+            {showOrders && <OrdersDrilldown orders={orders} loading={ordersLoading} />}
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+function OrdersDrilldown({ orders, loading }) {
+  if (loading) return <div className="orders-drill">Loading orders…</div>;
+  if (!orders) return null;
+  if (!orders.available) return <div className="orders-drill orders-drill-empty">Underlying orders require MongoDB connection.</div>;
+  const { summary, byCountry, orders: rows } = orders;
+  if (!summary.orders) return <div className="orders-drill orders-drill-empty">No historic orders found for this material / plant / office.</div>;
+  return (
+    <div className="orders-drill">
+      <div className="orders-drill-summary">
+        <span><b>{summary.orders}</b> orders</span>
+        <span><b>{summary.totalTons.toFixed(3)}</b> t total</span>
+        <span><b>{summary.customers}</b> customers</span>
+        {byCountry.length > 0 && (
+          <span>Top regions: {byCountry.map((c) => `${c.country} (${c.tons.toFixed(2)}t)`).join(", ")}</span>
+        )}
+      </div>
+      <table className="orders-drill-table">
+        <thead>
+          <tr><th>Date</th><th>Customer</th><th>Country</th><th>Postal</th><th>Tons</th><th>Type</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((o, i) => (
+            <tr key={i}>
+              <td>{String(o.date).slice(0, 10)}</td>
+              <td>{o.customer}</td>
+              <td>{o.recipient_country}</td>
+              <td>{o.recipient_postal_code}</td>
+              <td>{Number(o.quantity_in_tons).toFixed(4)}</td>
+              <td>{o.is_contract ? "Contract" : o.is_scheduling_agreement ? "Sched. agr." : "Free stock"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {summary.orders > rows.length && (
+        <div className="orders-drill-more">Showing latest {rows.length} of {summary.orders} orders</div>
+      )}
+    </div>
   );
 }
