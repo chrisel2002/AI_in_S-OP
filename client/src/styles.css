@@ -1,17 +1,17 @@
 /* ===== Reset & tokens ===== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg: #f2f2f2; --surface: #ffffff; --surface-2: #f8f8f8;
-  --border: #e0e0e0; --text: #1a1a1a; --text-2: #6b6b6b;
-  /* ThyssenKrupp primary yellow used for buttons / highlights */
-  --tk-yellow: #ffcc00; --tk-dark: #1a1a1a;
-  --blue: #1a1a1a; --blue-bg: #fff9e0; --blue-border: #fcd34d;
+  --bg: #f5f5f5; --surface: #ffffff; --surface-2: #f7f7f7;
+  --border: #e2e2e2; --text: #222222; --text-2: #707070;
+  /* ThyssenKrupp brand: #0095D8 blue on white */
+  --tk-blue: #0095D8; --tk-dark: #222222;
+  --blue: #0095D8; --blue-bg: #e6f4fb; --blue-border: #7dcaee;
   --teal: #085041; --teal-bg: #e1f5ee;
-  --amber: #633806; --amber-bg: #faeeda;
-  --red: #791f1f; --red-bg: #fcebeb;
+  --amber: #7a4300; --amber-bg: #fef0d9;
+  --red: #b91c1c; --red-bg: #fee2e2;
 }
 body {
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 13px; color: var(--text); background: var(--bg);
 }
 .db { max-width: 1180px; margin: 0 auto; padding: 18px; }
@@ -19,20 +19,20 @@ body {
 /* ===== Top bar — ThyssenKrupp branded ===== */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  background: var(--tk-dark); padding: 0 20px; height: 56px;
+  background: var(--tk-blue); padding: 0 20px; height: 56px;
   border-radius: 10px; margin-bottom: 16px;
 }
 .topbar-brand { display: flex; align-items: center; gap: 16px; }
 .topbar-tk-logo { display: flex; align-items: center; gap: 8px; }
 .tk-logo-box {
-  background: var(--tk-yellow); color: var(--tk-dark);
+  background: #fff; color: var(--tk-blue);
   font-size: 13px; font-weight: 900; padding: 3px 7px; border-radius: 4px;
   letter-spacing: .04em; line-height: 1;
 }
 .tk-logo-name { color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .03em; }
-.topbar-divider { width: 1px; height: 28px; background: rgba(255,255,255,.2); }
+.topbar-divider { width: 1px; height: 28px; background: rgba(255,255,255,.3); }
 .topbar-title { font-size: 15px; font-weight: 700; color: #fff; }
-.topbar-meta  { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
+.topbar-meta  { font-size: 11px; color: rgba(255,255,255,.7); margin-top: 2px; }
 
 /* ===== Buttons ===== */
 .btn {
@@ -40,14 +40,14 @@ body {
   border-radius: 6px; cursor: pointer; background: var(--surface); color: var(--text);
 }
 .btn:hover { background: var(--surface-2); }
-.btn-primary { background: var(--tk-yellow); color: var(--tk-dark); border-color: var(--tk-yellow); font-weight: 700; }
-.btn-primary:hover { background: #e6b800; border-color: #e6b800; }
+.btn-primary { background: var(--tk-blue); color: #fff; border-color: var(--tk-blue); font-weight: 600; }
+.btn-primary:hover { background: #007ab8; border-color: #007ab8; }
 .row-gap { display: flex; gap: 8px; }
 
 /* ===== Briefing ===== */
 .briefing-box { background: var(--blue-bg); border: 1px solid var(--blue-border); border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; }
 .briefing-box-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.briefing-box-title { font-size: 12px; font-weight: 700; color: #92400e; text-transform: uppercase; letter-spacing: .05em; }
+.briefing-box-title { font-size: 12px; font-weight: 700; color: var(--tk-blue); text-transform: uppercase; letter-spacing: .05em; }
 .briefing-box-text { font-size: 13.5px; color: var(--text); line-height: 1.8; white-space: pre-line; }
 
 /* ===== KPI cards ===== */
@@ -72,7 +72,7 @@ body {
 
 /* ---- fill colour classes (NO background on base .cbar-fill) ----------- */
 .cbar-fill           { display: block; height: 100%; border-radius: 4px; }
-.cbar-fill.fill-blue   { background-color: #3b82f6; }
+.cbar-fill.fill-blue   { background-color: var(--tk-blue); }
 .cbar-fill.fill-red    { background-color: #ef4444; }
 .cbar-fill.fill-amber  { background-color: #f59e0b; }
 .cbar-fill.fill-teal   { background-color: #10b981; }
@@ -118,7 +118,7 @@ tr:hover td { background: var(--surface-2); }
 
 /* ===== Signal detail panel (expanded row) ===== */
 .sig-detail {
-  display: flex; gap: 0; border-top: 2px solid var(--tk-yellow);
+  display: flex; gap: 0; border-top: 2px solid var(--tk-blue);
   background: var(--surface);
 }
 .sig-detail-why {
@@ -143,15 +143,15 @@ tr:hover td { background: var(--surface-2); }
   border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
 }
 .snap-col-alert {
-  background: #fff9e0; border-color: #fcd34d;
+  background: var(--blue-bg); border-color: var(--tk-blue);
 }
 .snap-col-date { font-size: 10.5px; color: var(--text-2); margin-bottom: 4px; }
 .snap-col-val  { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.1; }
 .snap-col-sub  { font-size: 10.5px; color: var(--text-2); margin-top: 3px; }
 .snap-arrow    { font-size: 20px; color: var(--text-2); flex-shrink: 0; }
 .snap-verdict  {
-  font-size: 12px; font-weight: 600; color: var(--tk-dark);
-  background: #fff3b0; border: 1px solid #fcd34d;
+  font-size: 12px; font-weight: 600; color: var(--tk-blue);
+  background: var(--blue-bg); border: 1px solid var(--blue-border);
   border-radius: 6px; padding: 6px 12px; display: inline-block;
 }
 .snap-fallback { font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
@@ -367,11 +367,11 @@ tr:hover td { background: var(--surface-2); }
 /* ===== Chat assistant ===== */
 .chat-fab {
   position: fixed; bottom: 20px; right: 20px; z-index: 60;
-  background: var(--tk-dark); color: var(--tk-yellow); border: none; border-radius: 24px;
-  padding: 12px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+  background: var(--tk-blue); color: #fff; border: none; border-radius: 24px;
+  padding: 12px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,149,216,.35);
 }
-.chat-fab:hover { background: #333; }
+.chat-fab:hover { background: #007ab8; }
 .chat-panel {
   position: fixed; bottom: 20px; right: 20px; z-index: 60;
   width: 370px; max-width: 92vw; height: 500px; max-height: 80vh;
@@ -400,6 +400,6 @@ tr:hover td { background: var(--surface-2); }
 .rules-list { display: flex; flex-direction: column; gap: 6px; }
 .rule-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
 .rule-item small { color: var(--text-2); }
-.link-btn { background: none; border: none; color: #92400e; cursor: pointer; font-size: 12px; font-weight: 600; }
+.link-btn { background: none; border: none; color: var(--tk-blue); cursor: pointer; font-size: 12px; font-weight: 600; }
 .link-btn:hover { text-decoration: underline; }
 .spacer { margin-bottom: 14px; }
