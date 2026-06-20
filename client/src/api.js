@@ -11,6 +11,13 @@ export const getRules = () => fetch("/api/rules").then(json);
 export const getOrders = ({ material, plant, salesOffice }) =>
   fetch(`/api/orders?material=${material}&plant=${plant}&sales_office=${salesOffice}`).then(json);
 
+export const validatePrompt = (sentence) =>
+  fetch("/api/validate-prompt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sentence }),
+  }).then(json);
+
 export const parseSentence = (sentence) =>
   fetch("/api/parse", {
     method: "POST",

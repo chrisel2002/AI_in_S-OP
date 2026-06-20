@@ -1,3 +1,4 @@
+import vm from "node:vm";
 
 const PRIORITY = (score) => (score >= 85 ? "High" : score >= 60 ? "Medium" : "Low");
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -156,6 +157,17 @@ function detectNewDemand(months) {
 
 const BUILTIN = [detectForecastDeviation, detectMoMChange, detectLowInventory, detectNewDemand];
 
+// ---- formula evaluation (sandboxed, for AI-generated rules) -------------
+
+function evalFormula(row, formula) {
+  try {
+    const sandbox = vm.createContext({ row: { ...row } });
+    return Boolean(vm.runInContext(formula, sandbox, { timeout: 50 }));
+  } catch {
+    return false;
+  }
+}
+
 // ---- custom rules -------------------------------------------------------
 
 const OPS = {
@@ -166,32 +178,77 @@ const OPS = {
   "==": (a, b) => a === b,
 };
 
+// Evaluate a single condition against a row. Returns { passes, value } or null if data missing.
+function evalCondition(r, cond) {
+  const baselineCol = resolveColumn(cond.baseline);
+  let value = r[cond.metric];
+  if (value === undefined || value === null) return null;
+  if (cond.comparison_type === "percent_change" && baselineCol) {
+    const base = r[baselineCol];
+    if (!base) return null;
+    value = ((r[cond.metric] - base) / base) * 100;
+  }
+  const op = OPS[cond.operator] || OPS[">"];
+  return { passes: op(value, Number(cond.threshold)), value };
+}
+
 // Returns ALL matching rows as individual signals (not just the single worst)
 function detectCustomRule(months, rule) {
-  const baselineCol = resolveColumn(rule.baseline);
+  const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 65 : 50;
   const results = [];
 
-  for (const r of months) {
-    let value = r[rule.metric];
-    if (value === undefined || value === null) continue;
-
-    if (rule.comparison_type === "percent_change" && baselineCol) {
-      const base = r[baselineCol];
-      if (base === undefined || base === null || base === 0) continue;
-      value = ((r[rule.metric] - base) / base) * 100;
+  // ── Formula path (AI-generated arbitrary expression) ────────────────────
+  if (rule.formula) {
+    for (const r of months) {
+      if (!evalFormula(r, rule.formula)) continue;
+      results.push(baseSignal(r, {
+        type: rule.name || "Custom rule",
+        month: r.date,
+        score,
+        priority: PRIORITY(score),
+        detail: rule.detail_label || "Formula condition matched",
+        reasoning: rule.raw_sentence || rule.formula,
+        actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
+      }));
     }
+    return results;
+  }
 
-    const op = OPS[rule.operator] || OPS[">"];
-    if (!op(value, Number(rule.threshold))) continue;
+  // ── Structured-condition path ────────────────────────────────────────────
+  let groups;
+  if (rule.groups?.length > 0) {
+    groups = rule.groups;
+  } else {
+    const conditions = rule.conditions?.length > 0
+      ? rule.conditions
+      : [{ metric: rule.metric, comparison_type: rule.comparison_type, baseline: rule.baseline, operator: rule.operator, threshold: rule.threshold }];
+    groups = [{ logic: rule.logic || "AND", conditions }];
+  }
+  const groupLogic = rule.groupLogic || "OR";
 
-    const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 65 : 50;
+  for (const r of months) {
+    const groupResults = groups.map((group) => {
+      const evals = (group.conditions || []).map((cond) => evalCondition(r, cond));
+      if (!evals.length || evals.some((e) => e === null)) return null;
+      return (group.logic || "AND") === "OR"
+        ? evals.some((e) => e.passes)
+        : evals.every((e) => e.passes);
+    });
+
+    if (groupResults.some((p) => p === null)) continue;
+    const passes = groupLogic === "OR"
+      ? groupResults.some((p) => p)
+      : groupResults.every((p) => p);
+    if (!passes) continue;
+
+    const totalConds = groups.reduce((s, g) => s + (g.conditions?.length || 0), 0);
     results.push(baseSignal(r, {
       type: rule.name || "Custom rule",
       month: r.date,
       score,
       priority: PRIORITY(score),
-      detail: `${METRICS[rule.metric] || rule.metric} ${rule.operator} ${rule.threshold} → ${value.toFixed(2)}`,
-      reasoning: rule.raw_sentence || `Custom rule: ${rule.metric} ${rule.operator} ${rule.threshold}.`,
+      detail: `${groups.length} group(s), ${totalConds} condition(s) matched`,
+      reasoning: rule.raw_sentence || `Custom rule: ${groups.length} group(s).`,
       actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
     }));
   }

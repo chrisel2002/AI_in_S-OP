@@ -150,15 +150,17 @@ export default function App() {
         <button className="btn btn-primary" onClick={() => setBuilder({})}>+ Add rule</button>
       </div>
 
-      {/* AI briefing */}
-      <div className="briefing">
-        <div className="briefing-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>✨ Signals Briefing{aiBriefing ? " — AI generated" : ""}</span>
+      {/* Briefing */}
+      <div className="briefing-box">
+        <div className="briefing-box-header">
+          <span className="briefing-box-title">✨ Planning Briefing</span>
           <button className="link-btn" onClick={regenerateBriefing} disabled={briefingLoading}>
-            {briefingLoading ? "Generating…" : "✨ Regenerate with AI"}
+            {briefingLoading ? "Generating…" : "Regenerate with AI"}
           </button>
         </div>
-        <div className="briefing-text">{aiBriefing || dash.briefing}</div>
+        <div className="briefing-box-text">
+          {aiBriefing || dash.briefing}
+        </div>
       </div>
 
       {/* KPI cards */}

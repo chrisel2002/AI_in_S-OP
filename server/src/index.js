@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 import { loadDataFromMongo, getRows } from "./data.js";
 import { detectSignals, buildDashboard } from "./signals.js";
 import { generateBriefing, generateBriefingLLM } from "./briefing.js";
-import { parseSentence } from "./parser.js";
+import { parseSentence, checkPromptClarity } from "./parser.js";
 import { suggestActions } from "./suggest.js";
 import { buildChatContext, answerQuestion } from "./chat.js";
 import {
@@ -75,6 +75,7 @@ app.get("/api/dashboard", async (req, res) => {
   res.json({
     ...dash,
     briefing: generateBriefing(allSignals),
+    topSignals: allSignals.slice(0, 5),
     storage: storageBackend(),
   });
 });
@@ -128,6 +129,13 @@ app.get("/api/orders", async (req, res) => {
     byCountry: byCountry.map((c) => ({ country: c._id, tons: c.tons })),
     orders,
   });
+});
+
+// --- prompt clarity check (before full parse) ---------------------------
+app.post("/api/validate-prompt", async (req, res) => {
+  const { sentence } = req.body;
+  if (!sentence) return res.status(400).json({ clear: false, suggestion: "Please enter a rule description." });
+  res.json(await checkPromptClarity(sentence));
 });
 
 // --- natural language -> rule draft -------------------------------------

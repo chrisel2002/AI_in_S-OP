@@ -5,16 +5,18 @@ import { chatLLM, llmEnabled } from "./llm.js";
 // generateBriefingLLM() = richer LLM prose (used on demand via the "Regenerate" button).
 export function generateBriefing(signals) {
   if (!signals.length) {
-    return "No signals detected this cycle. All demand plans are within tolerance versus the 12-month actuals.";
+    return "No signals detected this cycle.\nAll demand plans are within tolerance versus the 12-month actuals.";
   }
   const critical = signals.filter((s) => s.score > 80).length;
   const medium = signals.filter((s) => s.score >= 50 && s.score <= 80).length;
-  const top = signals.slice(0, 3).map(
-    (s) => `${s.type} on material ${s.material} / plant ${s.plant} (${s.detail})`
-  );
+  const top = signals.slice(0, 3);
+  const topLines = top
+    .map((s) => `  • ${s.type} — Material ${s.material}, Plant ${s.plant}\n    ${s.detail}`)
+    .join("\n\n");
   return (
-    `${critical} critical and ${medium} medium signals require attention this cycle. ` +
-    `Top items: ${top.join("; ")}. Open each signal for reasoning and suggested actions.`
+    `This cycle has ${critical} critical and ${medium} medium demand planning signals.\n\n` +
+    `Top signals:\n${topLines}\n\n` +
+    `Open any signal row below for full reasoning and suggested actions.`
   );
 }
 
@@ -31,7 +33,12 @@ export async function generateBriefingLLM(signals) {
       {
         role: "system",
         content:
-          "You are an S&OP planning analyst. Write a concise executive briefing (3-4 sentences, plain prose, no markdown, no bullet lists) for the weekly Sales & Operations Planning meeting. Summarise the most important demand-plan signals and what the team should focus on.",
+          "You are an S&OP planning analyst writing a briefing for the weekly Sales & Operations Planning meeting. " +
+          "Use this exact format — plain text, no markdown:\n\n" +
+          "Line 1: One sentence summarising the overall situation.\n\n" +
+          "Then 2-3 focus points, each on its own line starting with '• '.\n" +
+          "Each point names the issue, why it matters, and what the team should do.\n" +
+          "Keep it practical, specific, and under 80 words total.",
       },
       {
         role: "user",

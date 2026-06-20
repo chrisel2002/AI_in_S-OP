@@ -11,9 +11,31 @@ const FALLBACK = path.resolve(__dirname, "../rules_fallback.json");
 
 let backend = "file"; // becomes "mongo" if connection succeeds
 
+const conditionSchema = new mongoose.Schema(
+  { metric: String, comparison_type: String, baseline: String, operator: String, threshold: Number },
+  { _id: false }
+);
+
+const groupSchema = new mongoose.Schema(
+  {
+    logic: { type: String, enum: ["AND", "OR"], default: "AND" }, // ALL or ANY within the group
+    conditions: [conditionSchema],
+  },
+  { _id: false }
+);
+
 const ruleSchema = new mongoose.Schema(
   {
     name: String,
+    // Formula-based rules (AI-generated arbitrary expressions)
+    formula: String,
+    detail_label: String,
+    // Group-based fields
+    groups: [groupSchema],
+    groupLogic: { type: String, enum: ["AND", "OR"], default: "OR" },
+    // Legacy fields (kept for backward compat)
+    conditions: [conditionSchema],
+    logic: { type: String, enum: ["AND", "OR"], default: "AND" },
     metric: String,
     comparison_type: String,
     baseline: String,

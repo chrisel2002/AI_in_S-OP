@@ -30,9 +30,10 @@ body {
 .row-gap { display: flex; gap: 8px; }
 
 /* ===== Briefing ===== */
-.briefing { background: var(--blue-bg); border: 1px solid var(--blue-border); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
-.briefing-header { font-size: 11px; font-weight: 600; color: var(--blue); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
-.briefing-text { font-size: 13px; color: #185fa5; line-height: 1.6; }
+.briefing-box { background: var(--blue-bg); border: 1px solid var(--blue-border); border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; }
+.briefing-box-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.briefing-box-title { font-size: 12px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .05em; }
+.briefing-box-text { font-size: 13.5px; color: #185fa5; line-height: 1.8; white-space: pre-line; }
 
 /* ===== KPI cards ===== */
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
@@ -107,16 +108,165 @@ tr:hover td { background: var(--surface-2); }
 }
 
 /* ===== Modal ===== */
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding-top: 70px; z-index: 50; }
-.modal { background: var(--surface); border-radius: 10px; width: 560px; max-width: 92vw; padding: 20px 22px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
-.modal h2 { font-size: 16px; margin-bottom: 4px; }
-.modal .sub { font-size: 12px; color: var(--text-2); margin-bottom: 14px; }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: flex-start; justify-content: center; padding-top: 60px; z-index: 70; }
 .field { margin-bottom: 12px; }
 .field label { display: block; font-size: 11px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .03em; }
 .field input, .field select { width: 100%; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .hint { font-size: 11px; color: var(--text-2); margin-top: 6px; }
+
+/* ===== Rule Builder ===== */
+.rb-modal { background: var(--surface); border-radius: 12px; width: 640px; max-width: 95vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,.22); overflow: hidden; }
+.rb-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.rb-modal-title { font-size: 15px; font-weight: 700; }
+.rb-close-x { background: none; border: none; font-size: 20px; color: var(--text-2); cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+.rb-close-x:hover { background: var(--surface-2); color: var(--text); }
+.rb-modal-body { flex: 1; overflow-y: auto; padding: 20px; }
+.rb-section { display: flex; flex-direction: column; gap: 16px; }
+.rb-section-desc { font-size: 13px; color: var(--text-2); line-height: 1.5; }
+.rb-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+/* Mode picker */
+.rb-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rb-mode-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px; border: 1.5px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; text-align: left; transition: border-color .15s, box-shadow .15s; }
+.rb-mode-card:hover { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
+.rb-mode-icon { font-size: 24px; }
+.rb-mode-name { font-size: 13px; font-weight: 700; }
+.rb-mode-hint { font-size: 12px; color: var(--text-2); line-height: 1.4; }
+/* AI */
+.rb-textarea { width: 100%; resize: vertical; font-size: 13px; font-family: inherit; line-height: 1.5; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.rb-textarea:focus { outline: none; border-color: var(--blue); }
+.rb-ai-note { display: flex; align-items: center; justify-content: space-between; background: var(--blue-bg); border: 1px solid var(--blue-border); border-radius: 8px; padding: 9px 13px; font-size: 12px; color: var(--blue); gap: 8px; }
+.rb-prompt-hint { display: flex; align-items: flex-start; gap: 8px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 10px 13px; font-size: 13px; color: #92400e; line-height: 1.5; }
+.rb-prompt-hint-icon { flex-shrink: 0; font-size: 15px; }
+/* Fields */
+.rb-field { display: flex; flex-direction: column; gap: 7px; }
+.rb-label { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.rb-input { font-size: 13px; padding: 9px 11px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.rb-input:focus { outline: none; border-color: var(--blue); }
+/* Conditions header */
+.rb-conditions-header { display: flex; align-items: center; justify-content: space-between; }
+.rb-group-logic-row { display: flex; align-items: center; gap: 6px; }
+.rb-group-label { font-size: 12px; color: var(--text-2); }
+/* Logic pills */
+.rb-logic-pill { padding: 3px 12px; border-radius: 20px; border: 1px solid transparent; font-size: 11px; font-weight: 700; cursor: pointer; letter-spacing: .03em; }
+.rb-logic-and { background: var(--blue-bg); border-color: var(--blue-border); color: var(--blue); }
+.rb-logic-or  { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+.rb-logic-pill:hover { filter: brightness(.93); }
+/* Group separator */
+.rb-group-sep { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.rb-sep-line { flex: 1; height: 1px; background: var(--border); }
+.rb-sep-badge { padding: 3px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .05em; }
+/* Group card */
+.rb-group { border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; }
+.rb-group-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 13px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.rb-group-header-left { display: flex; align-items: center; gap: 6px; }
+.rb-group-body { padding: 12px 13px; }
+.rb-remove-group { font-size: 11px; color: var(--text-2); background: none; border: none; cursor: pointer; padding: 3px 7px; border-radius: 4px; }
+.rb-remove-group:hover { background: #fee2e2; color: #dc2626; }
+/* Condition row */
+.rb-cond { display: flex; align-items: flex-start; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; }
+.rb-cond-body { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rb-cond-inline { display: flex; align-items: center; gap: 6px; }
+.rb-cond-against { font-size: 11px; color: var(--text-2); white-space: nowrap; }
+.rb-select { font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.rb-select:focus { outline: none; border-color: var(--blue); }
+.rb-select-full { width: 100%; }
+.rb-select-grow { flex: 1; min-width: 0; }
+.rb-select-unit { min-width: 88px; }
+.rb-input-num { width: 68px; font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); text-align: right; flex-shrink: 0; }
+.rb-input-num:focus { outline: none; border-color: var(--blue); }
+.rb-remove { background: none; border: none; color: #ccc; cursor: pointer; font-size: 20px; line-height: 1; padding: 0; flex-shrink: 0; }
+.rb-remove:hover { color: #dc2626; }
+.rb-add-cond { background: none; border: none; color: var(--blue); font-size: 12px; cursor: pointer; padding: 2px 0; text-align: left; }
+.rb-add-cond:hover { text-decoration: underline; }
+.rb-add-group { width: 100%; border: 1.5px dashed var(--border); background: transparent; padding: 9px; border-radius: 8px; cursor: pointer; color: var(--text-2); font-size: 12px; margin-top: 6px; }
+.rb-add-group:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+/* Severity pills */
+.rb-sev-row { display: flex; gap: 8px; }
+.rb-sev-pill { padding: 7px 20px; border-radius: 20px; border: 1.5px solid var(--border); background: var(--surface); font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text-2); }
+
+/* Condition label row with mode toggle */
+.rb-conditions-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+
+/* Formula display (AI-generated rules) */
+.rb-formula-card { border: 1px solid var(--blue-border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.rb-formula-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; background: var(--blue-bg); font-size: 11px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .04em; }
+.rb-formula-human { padding: 16px 18px; font-size: 14px; line-height: 2; color: var(--text); white-space: pre-line; background: var(--surface); }
+.rb-formula-cols { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.rb-formula-cols-label { font-size: 11px; color: var(--text-2); font-weight: 600; margin-right: 2px; }
+.rb-formula-chip { font-size: 11px; background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); border-radius: 20px; padding: 2px 10px; cursor: pointer; }
+.rb-formula-chip:hover { background: var(--blue-border); }
+.rb-formula-signal { padding: 9px 14px; font-size: 12px; color: var(--text-2); border-top: 1px solid var(--border); }
+.rb-formula-signal em { color: var(--text); font-style: normal; font-weight: 500; }
+.rb-formula-code { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 11.5px; background: #0f172a; color: #93c5fd; padding: 12px 14px; white-space: pre-wrap; word-break: break-all; line-height: 1.7; margin: 0; }
+/* Empty formula prompt */
+.rb-formula-empty { padding: 20px 18px; text-align: center; color: var(--text-2); font-size: 13px; line-height: 1.7; }
+.rb-formula-empty code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--border); padding: 2px 6px; border-radius: 4px; color: var(--text); }
+/* Formula edit mode — side-by-side layout */
+.rb-formula-edit-layout {
+  display: flex; border-bottom: 1px solid var(--border);
+}
+
+/* Left panel: column picker — fixed height, scrolls internally */
+.rb-col-picker {
+  width: 210px; flex-shrink: 0;
+  max-height: 260px; overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+  display: flex; flex-direction: column;
+}
+
+/* Sticky search bar */
+.rb-col-search-row { padding: 8px 10px; position: sticky; top: 0; background: var(--surface-2); border-bottom: 1px solid var(--border); z-index: 1; }
+.rb-col-search {
+  width: 100%; font-size: 12px; padding: 6px 8px 6px 28px; box-sizing: border-box;
+  border: 1.5px solid var(--border); border-radius: 6px;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' fill='none' stroke='%239ca3af' stroke-width='2' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") no-repeat 8px center;
+  color: var(--text); outline: none;
+}
+.rb-col-search:focus { border-color: var(--blue); }
+.rb-col-search::placeholder { color: var(--text-2); }
+
+/* Groups inside picker */
+.rb-col-groups { padding: 8px 8px 10px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.rb-col-group { display: flex; flex-direction: column; gap: 3px; }
+.rb-col-group-label {
+  font-size: 9.5px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .07em; padding: 3px 2px 4px;
+  border-bottom: 1px solid var(--border); margin-bottom: 1px;
+}
+.rb-col-no-results { padding: 16px 10px; font-size: 12px; color: var(--text-2); text-align: center; }
+
+/* Column buttons — vertical list in sidebar */
+.rb-col-btn {
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 6px 8px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; cursor: pointer; text-align: left; gap: 1px;
+  transition: background .1s, border-color .1s;
+  overflow: hidden; min-width: 0; width: 100%;
+}
+.rb-col-btn:hover { background: var(--blue-bg); border-color: var(--blue-border); }
+.rb-col-btn-label {
+  font-size: 12px; font-weight: 600; color: var(--blue); line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+}
+.rb-col-btn-group {
+  font-size: 10px; color: var(--text-2); line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+}
+
+/* Right panel: formula editor */
+.rb-formula-editor-panel {
+  flex: 1; display: flex; flex-direction: column; min-width: 0;
+}
+/* Formula editor — grows with content via scrollHeight in JS */
+.rb-formula-editor { width: 100%; min-height: 80px; overflow-y: hidden; font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 12.5px; background: #0f172a; color: #93c5fd; padding: 14px 16px; border: none; border-bottom: 2px solid transparent; outline: none; resize: none; line-height: 1.8; display: block; transition: border-color .15s; box-sizing: border-box; }
+.rb-formula-editor-invalid { border-bottom-color: #f87171 !important; }
+/* Validation feedback */
+.rb-formula-err { padding: 7px 14px; font-size: 12px; color: #b91c1c; background: #fef2f2; border-top: 1px solid #fecaca; }
+.rb-formula-ok  { padding: 7px 14px; font-size: 12px; color: #166534; background: #f0fdf4; border-top: 1px solid #bbf7d0; }
+.rb-formula-editor-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
 
 /* ===== Drill-down ===== */
 .drill { background: #fbfbfa; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-top: 6px; font-size: 12px; }
