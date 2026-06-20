@@ -127,8 +127,8 @@ tr:hover td { background: var(--surface-2); }
   width: 300px; flex-shrink: 0; padding: 20px 22px; background: var(--surface-2);
 }
 .sig-detail-section-title {
-  font-size: 10px; font-weight: 700; color: var(--tk-blue);
-  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 14px;
+  font-size: 10px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px;
 }
 
 /* Snapshot: numbers that triggered the signal */
@@ -142,21 +142,20 @@ tr:hover td { background: var(--surface-2); }
   border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
 }
 .snap-col-alert {
-  background: var(--blue-bg); border: 2px solid var(--tk-blue);
+  background: var(--blue-bg); border-color: var(--blue-border);
 }
 .snap-col-date { font-size: 11px; color: var(--text-2); margin-bottom: 6px; font-weight: 500; }
-.snap-col-val  { font-size: 30px; font-weight: 700; color: var(--text); line-height: 1; letter-spacing: -.5px; }
-.snap-col-alert .snap-col-val { color: var(--tk-blue); }
+.snap-col-val  { font-size: 24px; font-weight: 700; color: var(--text); line-height: 1; letter-spacing: -.3px; }
 .snap-col-sub  { font-size: 11px; color: var(--text-2); margin-top: 6px; }
 .snap-arrow    {
   display: flex; align-items: center; justify-content: center;
-  font-size: 22px; color: var(--tk-blue); flex-shrink: 0; font-weight: 700;
+  font-size: 18px; color: var(--text-2); flex-shrink: 0;
   padding: 0 4px;
 }
 .snap-verdict  {
-  font-size: 12.5px; font-weight: 600; color: var(--tk-blue);
-  background: var(--blue-bg); border-left: 3px solid var(--tk-blue);
-  padding: 8px 14px; border-radius: 0 6px 6px 0;
+  font-size: 12px; font-weight: 600; color: var(--text);
+  background: var(--surface-2); border-left: 3px solid var(--tk-blue);
+  padding: 7px 12px; border-radius: 0 6px 6px 0;
 }
 .snap-fallback { font-size: 13px; color: var(--text-2); line-height: 1.7; }
 
@@ -185,9 +184,9 @@ tr:hover td { background: var(--surface-2); }
   font-size: 13px; line-height: 1.55; color: var(--text);
 }
 .action-num {
-  flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
-  background: var(--tk-blue); color: #fff; font-size: 11px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center; margin-top: 1px;
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--border); color: var(--text-2); font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-top: 2px;
 }
 .action-text { flex: 1; }
 
