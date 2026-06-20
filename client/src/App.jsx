@@ -64,6 +64,7 @@ export default function App() {
   const [rules, setRules] = useState([]);
   const [typeFilter, setTypeFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [builder, setBuilder] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
@@ -137,10 +138,16 @@ export default function App() {
   if (!dash) return <div className="db">Loading dashboard…</div>;
 
   // dash.signals is already type-filtered by the server.
-  // Only apply urgency filter client-side.
-  const filteredSignals = dash.signals.filter(
-    (s) => urgencyFilter === "all" || s.priority === urgencyFilter
-  );
+  // Urgency and status filters are applied client-side.
+  const filteredSignals = dash.signals.filter((s) => {
+    if (urgencyFilter !== "all" && s.priority !== urgencyFilter) return false;
+    if (statusFilter !== "all") {
+      const st = statuses[s.key]?.status || null;
+      if (statusFilter === "open" && st !== null) return false;
+      if (statusFilter !== "open" && st !== statusFilter) return false;
+    }
+    return true;
+  });
 
   const k = dash.kpis;
 
@@ -148,6 +155,7 @@ export default function App() {
     typeFilterRef.current = newType;
     setTypeFilter(newType);
     setUrgencyFilter("all");
+    setStatusFilter("all");
     setExpanded(null);
     refresh(0, newType);
   };
@@ -330,6 +338,14 @@ export default function App() {
               <option value="High">High</option>
               <option value="Medium">Medium</option>
               <option value="Low">Low</option>
+            </select>
+
+            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setExpanded(null); }}>
+              <option value="all">All statuses</option>
+              <option value="open">Open (unmarked)</option>
+              <option value="escalated">Escalated</option>
+              <option value="actioned">Actioned</option>
+              <option value="snoozed">Snoozed</option>
             </select>
 
             <button className="btn export-btn" onClick={handleExportCSV} title="Export all signals to CSV">
