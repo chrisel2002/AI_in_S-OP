@@ -143,7 +143,12 @@ export default function App() {
       <div className="topbar">
         <div className="topbar-brand">
           <div className="topbar-tk-logo">
-            <span className="tk-logo-box">tk</span>
+            {/* ThyssenKrupp three-circle mark */}
+            <svg width="34" height="34" viewBox="0 0 50 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <circle cx="25" cy="17" r="14" stroke="white" strokeWidth="2.6"/>
+              <circle cx="14" cy="37" r="14" stroke="white" strokeWidth="2.6"/>
+              <circle cx="36" cy="37" r="14" stroke="white" strokeWidth="2.6"/>
+            </svg>
             <span className="tk-logo-name">thyssenkrupp</span>
           </div>
           <div className="topbar-divider" />

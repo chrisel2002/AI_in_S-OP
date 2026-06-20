@@ -24,12 +24,7 @@ body {
 }
 .topbar-brand { display: flex; align-items: center; gap: 16px; }
 .topbar-tk-logo { display: flex; align-items: center; gap: 8px; }
-.tk-logo-box {
-  background: #fff; color: var(--tk-blue);
-  font-size: 13px; font-weight: 900; padding: 3px 7px; border-radius: 4px;
-  letter-spacing: .04em; line-height: 1;
-}
-.tk-logo-name { color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .03em; }
+.tk-logo-name { color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
 .topbar-divider { width: 1px; height: 28px; background: rgba(255,255,255,.3); }
 .topbar-title { font-size: 15px; font-weight: 700; color: #fff; }
 .topbar-meta  { font-size: 11px; color: rgba(255,255,255,.7); margin-top: 2px; }
