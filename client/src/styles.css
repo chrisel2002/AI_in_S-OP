@@ -1,9 +1,11 @@
 /* ===== Reset & tokens ===== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg: #f5f4f1; --surface: #ffffff; --surface-2: #faf9f7;
-  --border: #e6e4df; --text: #1f1e1c; --text-2: #6b6964;
-  --blue: #0c447c; --blue-bg: #e6f1fb; --blue-border: #b5d4f4;
+  --bg: #f2f2f2; --surface: #ffffff; --surface-2: #f8f8f8;
+  --border: #e0e0e0; --text: #1a1a1a; --text-2: #6b6b6b;
+  /* ThyssenKrupp primary yellow used for buttons / highlights */
+  --tk-yellow: #ffcc00; --tk-dark: #1a1a1a;
+  --blue: #1a1a1a; --blue-bg: #fff9e0; --blue-border: #fcd34d;
   --teal: #085041; --teal-bg: #e1f5ee;
   --amber: #633806; --amber-bg: #faeeda;
   --red: #791f1f; --red-bg: #fcebeb;
@@ -14,10 +16,23 @@ body {
 }
 .db { max-width: 1180px; margin: 0 auto; padding: 18px; }
 
-/* ===== Top bar ===== */
-.topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.topbar-title { font-size: 18px; font-weight: 600; }
-.topbar-meta  { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+/* ===== Top bar — ThyssenKrupp branded ===== */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--tk-dark); padding: 0 20px; height: 56px;
+  border-radius: 10px; margin-bottom: 16px;
+}
+.topbar-brand { display: flex; align-items: center; gap: 16px; }
+.topbar-tk-logo { display: flex; align-items: center; gap: 8px; }
+.tk-logo-box {
+  background: var(--tk-yellow); color: var(--tk-dark);
+  font-size: 13px; font-weight: 900; padding: 3px 7px; border-radius: 4px;
+  letter-spacing: .04em; line-height: 1;
+}
+.tk-logo-name { color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .03em; }
+.topbar-divider { width: 1px; height: 28px; background: rgba(255,255,255,.2); }
+.topbar-title { font-size: 15px; font-weight: 700; color: #fff; }
+.topbar-meta  { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
 
 /* ===== Buttons ===== */
 .btn {
@@ -25,15 +40,15 @@ body {
   border-radius: 6px; cursor: pointer; background: var(--surface); color: var(--text);
 }
 .btn:hover { background: var(--surface-2); }
-.btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
-.btn-primary:hover { background: #0a3a6a; }
+.btn-primary { background: var(--tk-yellow); color: var(--tk-dark); border-color: var(--tk-yellow); font-weight: 700; }
+.btn-primary:hover { background: #e6b800; border-color: #e6b800; }
 .row-gap { display: flex; gap: 8px; }
 
 /* ===== Briefing ===== */
 .briefing-box { background: var(--blue-bg); border: 1px solid var(--blue-border); border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; }
 .briefing-box-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.briefing-box-title { font-size: 12px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: .05em; }
-.briefing-box-text { font-size: 13.5px; color: #185fa5; line-height: 1.8; white-space: pre-line; }
+.briefing-box-title { font-size: 12px; font-weight: 700; color: #92400e; text-transform: uppercase; letter-spacing: .05em; }
+.briefing-box-text { font-size: 13.5px; color: var(--text); line-height: 1.8; white-space: pre-line; }
 
 /* ===== KPI cards ===== */
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
@@ -101,10 +116,64 @@ tr:hover td { background: var(--surface-2); }
 .filters select { font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .empty-state { padding: 18px 8px; color: var(--text-2); font-size: 13px; }
 
-/* ===== Action panel (expanded row) ===== */
-.action-panel {
-  background: var(--teal-bg); border: 1px solid #5dcaa5; border-radius: 6px;
-  padding: 10px 12px; font-size: 12px; color: var(--teal); line-height: 1.7; white-space: pre-line;
+/* ===== Signal detail panel (expanded row) ===== */
+.sig-detail {
+  display: flex; gap: 0; border-top: 2px solid var(--tk-yellow);
+  background: var(--surface);
+}
+.sig-detail-why {
+  flex: 1; padding: 16px 20px; border-right: 1px solid var(--border);
+}
+.sig-detail-actions {
+  width: 320px; flex-shrink: 0; padding: 16px 20px; background: var(--surface-2);
+}
+.sig-detail-section-title {
+  font-size: 10px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .07em; margin-bottom: 12px;
+}
+
+/* Snapshot: numbers that triggered the signal */
+.snap { display: flex; flex-direction: column; gap: 10px; }
+.snap-meta { font-size: 11.5px; color: var(--text-2); }
+.snap-compare {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.snap-col {
+  flex: 1; min-width: 100px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+}
+.snap-col-alert {
+  background: #fff9e0; border-color: #fcd34d;
+}
+.snap-col-date { font-size: 10.5px; color: var(--text-2); margin-bottom: 4px; }
+.snap-col-val  { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.1; }
+.snap-col-sub  { font-size: 10.5px; color: var(--text-2); margin-top: 3px; }
+.snap-arrow    { font-size: 20px; color: var(--text-2); flex-shrink: 0; }
+.snap-verdict  {
+  font-size: 12px; font-weight: 600; color: var(--tk-dark);
+  background: #fff3b0; border: 1px solid #fcd34d;
+  border-radius: 6px; padding: 6px 12px; display: inline-block;
+}
+.snap-fallback { font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
+
+/* Formula snapshot */
+.snap-formula-code {
+  font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
+  background: #1e1e1e; color: #93c5fd; padding: 10px 14px;
+  border-radius: 6px; white-space: pre-wrap; word-break: break-all;
+}
+.snap-vals { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.snap-val-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border);
+}
+.snap-val-row:last-child { border-bottom: none; }
+.snap-val-label { color: var(--text-2); }
+.snap-val-num   { font-weight: 600; color: var(--text); }
+
+/* Recommended actions text */
+.sig-actions-text {
+  font-size: 12.5px; line-height: 1.8; color: var(--text); white-space: pre-line;
 }
 
 /* ===== Modal ===== */
@@ -269,22 +338,15 @@ tr:hover td { background: var(--surface-2); }
 .rb-formula-editor-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
 
 /* ===== Drill-down ===== */
-.drill { background: #fbfbfa; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-top: 6px; font-size: 12px; }
-.drill-title { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
-.drill-summary { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 10px; color: var(--text-2); }
-.drill-summary b { color: var(--text); }
-.drill-table th { padding: 5px 8px; }
-.drill-table td { padding: 5px 8px; }
-.drill-more { font-size: 11px; color: var(--text-2); margin-top: 6px; }
 
 /* ===== Chat assistant ===== */
 .chat-fab {
   position: fixed; bottom: 20px; right: 20px; z-index: 60;
-  background: var(--blue); color: #fff; border: none; border-radius: 24px;
-  padding: 12px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,.2);
+  background: var(--tk-dark); color: var(--tk-yellow); border: none; border-radius: 24px;
+  padding: 12px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
 }
-.chat-fab:hover { background: #0a3a6a; }
+.chat-fab:hover { background: #333; }
 .chat-panel {
   position: fixed; bottom: 20px; right: 20px; z-index: 60;
   width: 370px; max-width: 92vw; height: 500px; max-height: 80vh;
@@ -313,5 +375,6 @@ tr:hover td { background: var(--surface-2); }
 .rules-list { display: flex; flex-direction: column; gap: 6px; }
 .rule-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
 .rule-item small { color: var(--text-2); }
-.link-btn { background: none; border: none; color: var(--blue); cursor: pointer; font-size: 12px; }
+.link-btn { background: none; border: none; color: #92400e; cursor: pointer; font-size: 12px; font-weight: 600; }
+.link-btn:hover { text-decoration: underline; }
 .spacer { margin-bottom: 14px; }

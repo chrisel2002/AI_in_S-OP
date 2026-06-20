@@ -77,6 +77,7 @@ function detectForecastDeviation(months) {
     reasoning: `Demand plan deviates ${(dev * 100).toFixed(0)}% from the 12-month actuals reference for this month. Threshold ±20%.`,
     actions:
       "1. Confirm with sales whether the revision is justified\n2. Cross-check against the Actuals 12M trend\n3. Adjust the safety buffer if validated",
+    snapshot: { kind: "deviation", plan, reference, devPct: dev * 100, thresholdPct: 20 },
   });
 }
 
@@ -89,7 +90,7 @@ function detectMoMChange(months) {
     if (prev < 0.01) continue;
     const change = (curr - prev) / prev;
     if (Math.abs(change) < 0.3) continue;
-    if (!worst || Math.abs(change) > Math.abs(worst.change)) worst = { r: months[i], change, prev, curr };
+    if (!worst || Math.abs(change) > Math.abs(worst.change)) worst = { r: months[i], change, prev, curr, prevDate: months[i - 1].date };
   }
   if (!worst) return null;
   const { r, change, prev, curr } = worst;
@@ -106,6 +107,15 @@ function detectMoMChange(months) {
       change > 0
         ? "1. Check plant capacity for the spike month\n2. Verify if a campaign/seasonal effect drives it\n3. Pre-build buffer if confirmed"
         : "1. Confirm the demand truly dropped\n2. Postpone open supply orders\n3. Reallocate incoming supply",
+    snapshot: {
+      kind: "mom_change",
+      prevDate: worst.prevDate,
+      prevVal: prev,
+      currDate: r.date,
+      currVal: curr,
+      changePct: change * 100,
+      thresholdPct: 30,
+    },
   });
 }
 
@@ -131,6 +141,7 @@ function detectLowInventory(months) {
     reasoning: `Inventory coverage is below the 1-ton threshold while demand is planned. Risk of stockout.`,
     actions:
       "1. Trigger replenishment order\n2. Reallocate stock from another plant\n3. Limit orders to existing contracts this week",
+    snapshot: { kind: "low_inventory", inv, demand, thresholdTons: 1 },
   });
 }
 
@@ -149,6 +160,7 @@ function detectNewDemand(months) {
         reasoning: `Demand is planned for a material/plant with no historic sales — verify the new forecast.`,
         actions:
           "1. Confirm the new demand with sales\n2. Check master-data setup for the material\n3. Plan initial safety stock",
+        snapshot: { kind: "new_demand", plan },
       });
     }
   }
@@ -201,6 +213,8 @@ function detectCustomRule(months, rule) {
   if (rule.formula) {
     for (const r of months) {
       if (!evalFormula(r, rule.formula)) continue;
+      const vals = {};
+      for (const col of Object.keys(METRICS)) if (r[col] != null) vals[col] = r[col];
       results.push(baseSignal(r, {
         type: rule.name || "Custom rule",
         month: r.date,
@@ -209,6 +223,7 @@ function detectCustomRule(months, rule) {
         detail: rule.detail_label || "Formula condition matched",
         reasoning: rule.raw_sentence || rule.formula,
         actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
+        snapshot: { kind: "formula", formula: rule.formula, values: vals },
       }));
     }
     return results;

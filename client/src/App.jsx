@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions } from "./api.js";
+import { getDashboard, getRules, deleteRule, getAiBriefing, suggestActions } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -141,10 +141,15 @@ export default function App() {
     <div className="db">
       {/* top bar */}
       <div className="topbar">
-        <div>
-          <div className="topbar-title">📊 S&amp;OP Signal Dashboard</div>
-          <div className="topbar-meta">
-            Planning cycle 2026-06 · {k.rulesActive} active custom rules ·
+        <div className="topbar-brand">
+          <div className="topbar-tk-logo">
+            <span className="tk-logo-box">tk</span>
+            <span className="tk-logo-name">thyssenkrupp</span>
+          </div>
+          <div className="topbar-divider" />
+          <div>
+            <div className="topbar-title">S&amp;OP Signal Dashboard</div>
+            <div className="topbar-meta">Planning cycle 2026-06 · {k.rulesActive} active custom rules</div>
           </div>
         </div>
         <button className="btn btn-primary" onClick={() => setBuilder({})}>+ Add rule</button>
@@ -336,15 +341,146 @@ export default function App() {
   );
 }
 
+const SNAP_METRIC_LABELS = {
+  sales_free_stock_in_tons: "Forecast (free stock)",
+  sales_contracts_in_tons: "Forecast (contracts)",
+  sales_scheduling_agreement_in_tons: "Forecast (sched. agr.)",
+  historic_inventory_12_free_stock_in_tons: "Inventory 12M avg",
+  historic_sales_12_free_stock_in_tons: "Historic sales 12M",
+  historic_sales_24_free_stock_in_tons: "Historic sales 24M",
+  historic_sales_12_contracts_in_tons: "Historic contracts 12M",
+  historic_sales_24_contracts_in_tons: "Historic contracts 24M",
+  historic_sales_12_scheduling_agreement_in_tons: "Historic sched. agr. 12M",
+  historic_sales_24_scheduling_agreement_in_tons: "Historic sched. agr. 24M",
+};
+
+function SnapshotView({ snap, s }) {
+  if (!snap) return <p className="snap-fallback">{s.reasoning}</p>;
+
+  if (snap.kind === "mom_change") {
+    const up = snap.changePct > 0;
+    const absPct = Math.abs(snap.changePct).toFixed(0);
+    return (
+      <div className="snap">
+        <div className="snap-meta">Forecast free-stock sales — month over month</div>
+        <div className="snap-compare">
+          <div className="snap-col">
+            <div className="snap-col-date">{snap.prevDate}</div>
+            <div className="snap-col-val">{snap.prevVal.toFixed(2)} t</div>
+            <div className="snap-col-sub">Previous month</div>
+          </div>
+          <div className="snap-arrow">{up ? "▲" : "▼"}</div>
+          <div className="snap-col snap-col-alert">
+            <div className="snap-col-date">{snap.currDate}</div>
+            <div className="snap-col-val">{snap.currVal.toFixed(2)} t</div>
+            <div className="snap-col-sub">This month</div>
+          </div>
+        </div>
+        <div className="snap-verdict">
+          {up ? "+" : ""}{absPct}% month-over-month &nbsp;·&nbsp; threshold ±{snap.thresholdPct}%
+        </div>
+      </div>
+    );
+  }
+
+  if (snap.kind === "deviation") {
+    const up = snap.devPct > 0;
+    return (
+      <div className="snap">
+        <div className="snap-meta">Forecast vs 12-month historic baseline</div>
+        <div className="snap-compare">
+          <div className="snap-col">
+            <div className="snap-col-date">12M historic avg</div>
+            <div className="snap-col-val">{snap.reference.toFixed(2)} t</div>
+            <div className="snap-col-sub">Baseline</div>
+          </div>
+          <div className="snap-arrow">vs</div>
+          <div className="snap-col snap-col-alert">
+            <div className="snap-col-date">Current forecast</div>
+            <div className="snap-col-val">{snap.plan.toFixed(2)} t</div>
+            <div className="snap-col-sub">Plan</div>
+          </div>
+        </div>
+        <div className="snap-verdict">
+          {up ? "+" : ""}{Math.abs(snap.devPct).toFixed(0)}% {up ? "above" : "below"} baseline &nbsp;·&nbsp; threshold ±{snap.thresholdPct}%
+        </div>
+      </div>
+    );
+  }
+
+  if (snap.kind === "low_inventory") {
+    const coverageDays = snap.demand > 0 ? ((snap.inv / snap.demand) * 30).toFixed(0) : "—";
+    return (
+      <div className="snap">
+        <div className="snap-meta">Inventory vs planned demand</div>
+        <div className="snap-compare">
+          <div className="snap-col snap-col-alert">
+            <div className="snap-col-date">Current inventory</div>
+            <div className="snap-col-val">{snap.inv.toFixed(2)} t</div>
+            <div className="snap-col-sub">≈ {coverageDays} days cover</div>
+          </div>
+          <div className="snap-arrow">vs</div>
+          <div className="snap-col">
+            <div className="snap-col-date">Planned demand</div>
+            <div className="snap-col-val">{snap.demand.toFixed(2)} t</div>
+            <div className="snap-col-sub">This month</div>
+          </div>
+        </div>
+        <div className="snap-verdict">Inventory below {snap.thresholdTons} t minimum threshold</div>
+      </div>
+    );
+  }
+
+  if (snap.kind === "new_demand") {
+    return (
+      <div className="snap">
+        <div className="snap-meta">New demand — no sales history found</div>
+        <div className="snap-compare">
+          <div className="snap-col snap-col-alert">
+            <div className="snap-col-date">Planned forecast</div>
+            <div className="snap-col-val">{snap.plan.toFixed(2)} t</div>
+            <div className="snap-col-sub">Current plan</div>
+          </div>
+          <div className="snap-arrow">vs</div>
+          <div className="snap-col">
+            <div className="snap-col-date">Historic sales</div>
+            <div className="snap-col-val">0 t</div>
+            <div className="snap-col-sub">12M + 24M combined</div>
+          </div>
+        </div>
+        <div className="snap-verdict">No prior sales history for this material / plant / office</div>
+      </div>
+    );
+  }
+
+  if (snap.kind === "formula") {
+    const vals = Object.entries(snap.values || {}).filter(([, v]) => v != null && v !== 0);
+    return (
+      <div className="snap">
+        <div className="snap-meta">Formula rule matched — row values at trigger</div>
+        <div className="snap-formula-code">{snap.formula}</div>
+        {vals.length > 0 && (
+          <div className="snap-vals">
+            {vals.map(([col, val]) => (
+              <div key={col} className="snap-val-row">
+                <span className="snap-val-label">{SNAP_METRIC_LABELS[col] || col}</span>
+                <span className="snap-val-num">{Number(val).toFixed(2)} t</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return <p className="snap-fallback">{s.reasoning}</p>;
+}
+
 function Row({ s, expanded, onToggle }) {
-  const [orders, setOrders] = useState(null);
   const [aiActions, setAiActions] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
-    if (expanded && !orders) {
-      getOrders({ material: s.material, plant: s.plant, salesOffice: s.salesOffice }).then(setOrders);
-    }
     if (expanded && aiActions === null && !aiLoading) {
       setAiLoading(true);
       suggestActions(s)
@@ -379,53 +515,21 @@ function Row({ s, expanded, onToggle }) {
       {expanded && (
         <tr>
           <td colSpan={8} style={{ padding: 0 }}>
-            <div className="action-panel">
-              <b>Reasoning:</b> {s.reasoning}{"\n\n"}
-              <b>AI-suggested actions:</b>{"\n"}
-              {aiLoading ? "Generating with AI…" : (aiActions || s.actions)}
+            <div className="sig-detail">
+              <div className="sig-detail-why">
+                <div className="sig-detail-section-title">Why this fired</div>
+                <SnapshotView snap={s.snapshot} s={s} />
+              </div>
+              <div className="sig-detail-actions">
+                <div className="sig-detail-section-title">Recommended actions</div>
+                <div className="sig-actions-text">
+                  {aiLoading ? "Generating with AI…" : (aiActions || s.actions)}
+                </div>
+              </div>
             </div>
-            <Drilldown orders={orders} />
           </td>
         </tr>
       )}
     </>
-  );
-}
-
-function Drilldown({ orders }) {
-  if (!orders) return <div className="drill">Loading underlying orders…</div>;
-  if (!orders.available) return <div className="drill">Underlying orders need MongoDB (storage is local file).</div>;
-  const { summary, byCountry, orders: rows } = orders;
-  if (!summary.orders) return <div className="drill">No underlying orders found for this material / plant / office.</div>;
-  return (
-    <div className="drill">
-      <div className="drill-title">Underlying sales orders (historic actuals)</div>
-      <div className="drill-summary">
-        <span><b>{summary.orders}</b> orders</span>
-        <span><b>{summary.totalTons.toFixed(3)}</b> t total</span>
-        <span><b>{summary.customers}</b> customers</span>
-        <span>Top regions: {byCountry.map((c) => `${c.country} (${c.tons.toFixed(2)}t)`).join(", ")}</span>
-      </div>
-      <table className="drill-table">
-        <thead>
-          <tr><th>Date</th><th>Customer</th><th>Country</th><th>Postal</th><th>Tons</th><th>Type</th></tr>
-        </thead>
-        <tbody>
-          {rows.map((o, i) => (
-            <tr key={i}>
-              <td>{String(o.date).slice(0, 10)}</td>
-              <td>{o.customer}</td>
-              <td>{o.recipient_country}</td>
-              <td>{o.recipient_postal_code}</td>
-              <td>{Number(o.quantity_in_tons).toFixed(4)}</td>
-              <td>{o.is_contract ? "Contract" : o.is_scheduling_agreement ? "Sched. agr." : "Free stock"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {summary.orders > rows.length && (
-        <div className="drill-more">Showing latest {rows.length} of {summary.orders} orders.</div>
-      )}
-    </div>
   );
 }
