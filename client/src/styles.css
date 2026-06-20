@@ -171,7 +171,32 @@ tr:hover td { background: var(--surface-2); }
 .snap-val-num   { font-weight: 700; color: var(--text); font-size: 13px; }
 
 /* Recommended actions list */
-.action-loading { font-size: 12.5px; color: var(--text-2); font-style: italic; }
+/* Skeleton loader for AI actions */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.skeleton-base {
+  background: linear-gradient(90deg, var(--border) 25%, var(--surface-2) 50%, var(--border) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 4px;
+}
+.action-skeleton { display: flex; flex-direction: column; gap: 12px; }
+.action-skeleton-item { display: flex; gap: 10px; align-items: flex-start; }
+.skeleton-circle {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; margin-top: 2px;
+  background: linear-gradient(90deg, var(--border) 25%, var(--surface-2) 50%, var(--border) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+.skeleton-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; padding-top: 3px; }
+.skeleton-line {
+  height: 11px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--border) 25%, var(--surface-2) 50%, var(--border) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
 .sig-actions-text { font-size: 12.5px; line-height: 1.8; color: var(--text); white-space: pre-line; }
 .action-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .action-list-item {

@@ -481,7 +481,20 @@ function SnapshotView({ snap, s }) {
   return <p className="snap-fallback">{s.reasoning}</p>;
 }
 
-function ActionList({ text }) {
+function ActionList({ text, loading }) {
+  if (loading) return (
+    <div className="action-skeleton">
+      {[70, 90, 55].map((w, i) => (
+        <div key={i} className="action-skeleton-item">
+          <div className="skeleton-circle" />
+          <div className="skeleton-lines">
+            <div className="skeleton-line" style={{ width: `${w}%` }} />
+            {w > 70 && <div className="skeleton-line" style={{ width: `${w - 25}%` }} />}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
   if (!text) return null;
   // Parse "1. Foo\n2. Bar" into individual items; fall back to plain text
   const items = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
@@ -559,7 +572,7 @@ function Row({ s, expanded, onToggle }) {
               </div>
               <div className="sig-detail-actions">
                 <div className="sig-detail-section-title">Recommended actions</div>
-                <ActionList text={aiActions || s.actions} />
+                <ActionList text={aiActions} loading={aiLoading} />
               </div>
             </div>
             <div className="sig-orders-toggle-row">
