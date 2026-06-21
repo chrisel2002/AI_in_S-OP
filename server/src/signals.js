@@ -170,14 +170,27 @@ function detectNewDemand(months) {
 const BUILTIN = [detectForecastDeviation, detectMoMChange, detectLowInventory, detectNewDemand];
 
 // ---- formula evaluation (sandboxed, for AI-generated rules) -------------
+// Compile each formula script once and reuse a single context per formula
+// instead of creating a new V8 context per row (which is very slow at scale).
+const _formulaRunners = new Map();
+
+function getFormulaRunner(formula) {
+  if (_formulaRunners.has(formula)) return _formulaRunners.get(formula);
+  const script = new vm.Script(formula);
+  const rowRef = {};
+  const ctx = vm.createContext({ row: rowRef });
+  const run = (row) => {
+    // Overwrite the shared row object in-place — same schema for all rows
+    Object.assign(rowRef, row);
+    try { return Boolean(script.runInContext(ctx, { timeout: 50 })); }
+    catch { return false; }
+  };
+  _formulaRunners.set(formula, run);
+  return run;
+}
 
 function evalFormula(row, formula) {
-  try {
-    const sandbox = vm.createContext({ row: { ...row } });
-    return Boolean(vm.runInContext(formula, sandbox, { timeout: 50 }));
-  } catch {
-    return false;
-  }
+  return getFormulaRunner(formula)(row);
 }
 
 // ---- custom rules -------------------------------------------------------

@@ -27,24 +27,29 @@ app.use(cors());
 app.use(express.json());
 
 // --- signal cache -----------------------------------------------------------
-// Data is static after boot; only rule changes require re-detection.
-let _cachedRules = null;
-let _cachedSignals = null;
+// Promise-based: concurrent requests share the same in-flight rebuild.
+// Immediately restarts the rebuild after any rule mutation so the next
+// request almost always hits a warm cache.
+let _rulesPromise = null;
+let _signalsPromise = null;
 
-function invalidateSignalCache() {
-  _cachedRules = null;
-  _cachedSignals = null;
+function getCachedRules() {
+  if (!_rulesPromise) _rulesPromise = listRules();
+  return _rulesPromise;
 }
 
-async function getCachedRules() {
-  if (!_cachedRules) _cachedRules = await listRules();
-  return _cachedRules;
+function getCachedSignals() {
+  if (!_signalsPromise)
+    _signalsPromise = getCachedRules().then((rules) => detectSignals(getRows(), rules));
+  return _signalsPromise;
 }
 
-async function getCachedSignals() {
-  if (!_cachedRules) _cachedRules = await listRules();
-  if (!_cachedSignals) _cachedSignals = detectSignals(getRows(), _cachedRules);
-  return _cachedSignals;
+function invalidateAndRebuild() {
+  _rulesPromise = listRules();
+  _signalsPromise = _rulesPromise.then((rules) => detectSignals(getRows(), rules));
+  _signalsPromise
+    .then(() => console.log("✅ Signal cache rebuilt"))
+    .catch(() => { _signalsPromise = null; });
 }
 
 // --- dashboard: signals + KPIs + briefing -------------------------------
@@ -77,26 +82,11 @@ async function getCachedSignals() {
 // ✅ FIXED
 app.get("/api/dashboard", async (req, res) => {
   const [allSignals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
-  const rawPage = Number.parseInt(req.query.page, 10);
-  const rawPageSize = Number.parseInt(req.query.pageSize, 10);
-  const page = Number.isFinite(rawPage) && rawPage >= 0 ? rawPage : 0;
-  const pageSize = Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.min(rawPageSize, 200) : 100;
-
-  const typeFilter = (req.query.type || "").trim();
-  const filteredSignals = typeFilter && typeFilter !== "all"
-    ? allSignals.filter((s) => s.type === typeFilter)
-    : allSignals;
-
-  const dash = buildDashboard(filteredSignals, rules.filter((r) => r.active !== false).length, {
-    page,
-    pageSize,
-    allSignals,
-  });
-
+  const dash = buildDashboard(allSignals, rules.filter((r) => r.active !== false).length, { allSignals });
   res.json({
     ...dash,
+    allSignals,           // full list — client handles filtering + pagination
     briefing: generateBriefing(allSignals),
-    topSignals: allSignals.slice(0, 5),
     storage: storageBackend(),
   });
 });
@@ -230,7 +220,7 @@ app.post("/api/rules", async (req, res) => {
   try {
     const rule = await insertRule(req.body);
     console.log("✅ Rule saved to DB:", JSON.stringify(rule));
-    invalidateSignalCache();
+    invalidateAndRebuild();
     res.json(rule);
   } catch (e) {
     console.error("❌ Rule save failed:", e.message);
@@ -240,13 +230,13 @@ app.post("/api/rules", async (req, res) => {
 
 app.put("/api/rules/:id", async (req, res) => {
   const rule = await updateRule(req.params.id, req.body);
-  invalidateSignalCache();
+  invalidateAndRebuild();
   res.json(rule);
 });
 
 app.delete("/api/rules/:id", async (req, res) => {
   await deleteRule(req.params.id);
-  invalidateSignalCache();
+  invalidateAndRebuild();
   res.json({ ok: true });
 });
 

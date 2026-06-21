@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef } from "react";
-import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions, getSignalStatuses, setSignalStatus, clearSignalStatus, getAllSignals } from "./api.js";
+import { useEffect, useState } from "react";
+import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions, getSignalStatuses, setSignalStatus, clearSignalStatus } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -61,20 +61,18 @@ function BarChart({ data, colorClassMap, fallbackClasses }) {
 
 export default function App() {
   const [dash, setDash] = useState(null);
+  const [allSignals, setAllSignals] = useState([]);
   const [rules, setRules] = useState([]);
   const [typeFilter, setTypeFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [builder, setBuilder] = useState(null);
   const [expanded, setExpanded] = useState(null);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [page, setPage] = useState(0);
   const [aiBriefing, setAiBriefing] = useState(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [statuses, setStatuses] = useState({});
-  const itemsPerPage = 100;
-
-  // Ref so refresh() always reads the latest typeFilter without stale closure
-  const typeFilterRef = useRef("all");
+  const PAGE_SIZE = 100;
 
   async function regenerateBriefing() {
     setBriefingLoading(true);
@@ -86,17 +84,18 @@ export default function App() {
     }
   }
 
-  async function refresh(page = 0, type = typeFilterRef.current, { fetchRules = false } = {}) {
-    const fetches = [getDashboard({ page, pageSize: itemsPerPage, type })];
+  async function refresh({ fetchRules = false } = {}) {
+    const fetches = [getDashboard()];
     if (fetchRules) fetches.push(getRules());
     const [d, r] = await Promise.all(fetches);
     setDash(d);
+    if (d.allSignals) setAllSignals(d.allSignals);
     if (r) setRules(r);
-    setCurrentPage(page);
+    setPage(0);
   }
 
   useEffect(() => {
-    refresh(0, "all", { fetchRules: true });
+    refresh({ fetchRules: true });
     getSignalStatuses().then(setStatuses).catch(() => {});
   }, []);
 
@@ -111,7 +110,7 @@ export default function App() {
   }
 
   async function handleExportCSV() {
-    const signals = await getAllSignals(typeFilterRef.current);
+    const signals = typeFilter === "all" ? allSignals : allSignals.filter(s => s.type === typeFilter);
     const briefingText = aiBriefing || dash.briefing || "";
     const header = ["Type", "Material", "Plant", "Sales Office", "Month", "Priority", "Score", "Detail", "Status"].join(",");
     const rows = signals.map((s) => {
@@ -136,9 +135,9 @@ export default function App() {
 
   if (!dash) return <div className="db">Loading dashboard…</div>;
 
-  // dash.signals is already type-filtered by the server.
-  // Urgency and status filters are applied client-side.
-  const filteredSignals = dash.signals.filter((s) => {
+  // All filtering and pagination is client-side — no server round-trips needed.
+  const filteredSignals = allSignals.filter((s) => {
+    if (typeFilter !== "all" && s.type !== typeFilter) return false;
     if (urgencyFilter !== "all" && s.priority !== urgencyFilter) return false;
     if (statusFilter !== "all") {
       const st = statuses[s.key]?.status || null;
@@ -147,34 +146,24 @@ export default function App() {
     }
     return true;
   });
+  const totalPages = Math.max(1, Math.ceil(filteredSignals.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pagedSignals = filteredSignals.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const displayStart = filteredSignals.length ? safePage * PAGE_SIZE + 1 : 0;
+  const displayEnd = safePage * PAGE_SIZE + pagedSignals.length;
 
   const k = dash.kpis;
 
   const handleTypeChange = (newType) => {
-    typeFilterRef.current = newType;
     setTypeFilter(newType);
     setUrgencyFilter("all");
     setStatusFilter("all");
     setExpanded(null);
-    refresh(0, newType);
+    setPage(0);
   };
 
-  const handleNext = () => {
-    if (!dash || dash.page >= dash.totalPages - 1) return;
-    refresh(dash.page + 1, typeFilterRef.current);
-  };
-
-  const handlePrev = () => {
-    if (!dash || dash.page <= 0) return;
-    refresh(dash.page - 1, typeFilterRef.current);
-  };
-
-  const page = dash.page ?? currentPage;
-  const totalPages = dash.totalPages ?? 1;
-  const pageSize = dash.pageSize ?? itemsPerPage;
-  const rangeStart = dash.signals.length ? page * pageSize : 0;
-  const displayStart = dash.signals.length ? rangeStart + 1 : 0;
-  const displayEnd = dash.signals.length ? rangeStart + dash.signals.length : 0;
+  const handleNext = () => setPage((p) => Math.min(p + 1, totalPages - 1));
+  const handlePrev = () => setPage((p) => Math.max(p - 1, 0));
 
   // Build dropdown options: byType (all signals) + any custom rule names not yet producing signals
   const dropdownTypes = [
@@ -274,11 +263,11 @@ export default function App() {
                 <div className="row-gap">
                   <button className="link-btn" onClick={() => setBuilder(r)}>Edit</button>
                   <button className="link-btn" onClick={async () => {
+                    // Optimistic: remove immediately from rules list
+                    setRules((prev) => prev.filter((x) => x._id !== r._id));
+                    if (typeFilter === r.name) { setTypeFilter("all"); setPage(0); }
                     await deleteRule(r._id);
-                    const nextType = typeFilterRef.current === r.name ? "all" : typeFilterRef.current;
-                    typeFilterRef.current = nextType;
-                    setTypeFilter(nextType);
-                    refresh(0, nextType, { fetchRules: true });
+                    refresh({ fetchRules: true });
                   }}>Delete</button>
                 </div>
               </div>
@@ -292,10 +281,10 @@ export default function App() {
         <div className="table-header-row">
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <div className="card-title" style={{ margin: 0 }}>
-              Signal table — prioritised ({displayStart}–{displayEnd}) of {k.total}
+              Signal table — prioritised ({displayStart}–{displayEnd}) of {filteredSignals.length}
             </div>
             <div className="card-title">
-              Page {page + 1} of {totalPages}
+              Page {safePage + 1} of {totalPages}
             </div>
           </div>
 
@@ -303,11 +292,11 @@ export default function App() {
             <div>
               <button
                 onClick={handlePrev}
-                disabled={!dash || page === 0}
+                disabled={safePage === 0}
                 style={{
                   padding: "5px 8px", fontSize: "10px",
-                  cursor: page === 0 ? "not-allowed" : "pointer",
-                  opacity: page === 0 ? 0.5 : 1,
+                  cursor: safePage === 0 ? "not-allowed" : "pointer",
+                  opacity: safePage === 0 ? 0.5 : 1,
                   border: "1px solid grey", backgroundColor: "#fff",
                   color: "grey", borderRadius: "4px",
                 }}>
@@ -315,11 +304,11 @@ export default function App() {
               </button>
               <button
                 onClick={handleNext}
-                disabled={!dash || page >= totalPages - 1}
+                disabled={safePage >= totalPages - 1}
                 style={{
                   padding: "5px 8px", fontSize: "10px",
-                  cursor: page >= totalPages - 1 ? "not-allowed" : "pointer",
-                  opacity: page >= totalPages - 1 ? 0.5 : 1,
+                  cursor: safePage >= totalPages - 1 ? "not-allowed" : "pointer",
+                  opacity: safePage >= totalPages - 1 ? 0.5 : 1,
                   border: "1px solid grey", backgroundColor: "#fff",
                   color: "grey", borderRadius: "4px", marginLeft: "8px",
                 }}>
@@ -353,7 +342,7 @@ export default function App() {
           </div>
         </div>
 
-        {filteredSignals.length === 0 ? (
+        {pagedSignals.length === 0 ? (
           <div className="empty-state">No signals match the current filters.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -366,7 +355,7 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {filteredSignals.map((s) => (
+                {pagedSignals.map((s) => (
                   <Row
                     key={s.id}
                     s={s}
@@ -390,13 +379,12 @@ export default function App() {
           onSaved={(savedName) => {
             setBuilder(null);
             if (savedName && !builder._id) {
-              typeFilterRef.current = savedName;
               setTypeFilter(savedName);
               setUrgencyFilter("all");
-              refresh(0, savedName, { fetchRules: true });
-            } else {
-              refresh(0, typeFilterRef.current, { fetchRules: true });
+              setStatusFilter("all");
+              setPage(0);
             }
+            refresh({ fetchRules: true });
           }}
         />
       )}
