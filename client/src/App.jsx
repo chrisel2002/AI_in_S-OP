@@ -86,18 +86,17 @@ export default function App() {
     }
   }
 
-  async function refresh(page = 0, type = typeFilterRef.current) {
-    const [d, r] = await Promise.all([
-      getDashboard({ page, pageSize: itemsPerPage, type }),
-      getRules(),
-    ]);
+  async function refresh(page = 0, type = typeFilterRef.current, { fetchRules = false } = {}) {
+    const fetches = [getDashboard({ page, pageSize: itemsPerPage, type })];
+    if (fetchRules) fetches.push(getRules());
+    const [d, r] = await Promise.all(fetches);
     setDash(d);
-    setRules(r);
+    if (r) setRules(r);
     setCurrentPage(page);
   }
 
   useEffect(() => {
-    refresh(0, "all");
+    refresh(0, "all", { fetchRules: true });
     getSignalStatuses().then(setStatuses).catch(() => {});
   }, []);
 
@@ -279,7 +278,7 @@ export default function App() {
                     const nextType = typeFilterRef.current === r.name ? "all" : typeFilterRef.current;
                     typeFilterRef.current = nextType;
                     setTypeFilter(nextType);
-                    refresh(0, nextType);
+                    refresh(0, nextType, { fetchRules: true });
                   }}>Delete</button>
                 </div>
               </div>
@@ -394,9 +393,9 @@ export default function App() {
               typeFilterRef.current = savedName;
               setTypeFilter(savedName);
               setUrgencyFilter("all");
-              refresh(0, savedName);
+              refresh(0, savedName, { fetchRules: true });
             } else {
-              refresh(0, typeFilterRef.current);
+              refresh(0, typeFilterRef.current, { fetchRules: true });
             }
           }}
         />

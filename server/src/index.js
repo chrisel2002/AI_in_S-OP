@@ -26,6 +26,27 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// --- signal cache -----------------------------------------------------------
+// Data is static after boot; only rule changes require re-detection.
+let _cachedRules = null;
+let _cachedSignals = null;
+
+function invalidateSignalCache() {
+  _cachedRules = null;
+  _cachedSignals = null;
+}
+
+async function getCachedRules() {
+  if (!_cachedRules) _cachedRules = await listRules();
+  return _cachedRules;
+}
+
+async function getCachedSignals() {
+  if (!_cachedRules) _cachedRules = await listRules();
+  if (!_cachedSignals) _cachedSignals = detectSignals(getRows(), _cachedRules);
+  return _cachedSignals;
+}
+
 // --- dashboard: signals + KPIs + briefing -------------------------------
 // app.get("/api/dashboard", async (req, res) => {
 //   const rules = await listRules();
@@ -55,8 +76,7 @@ app.use(express.json());
 // });
 // ✅ FIXED
 app.get("/api/dashboard", async (req, res) => {
-  const rules = await listRules();
-  const allSignals = detectSignals(getRows(), rules);  // ← rename to allSignals
+  const [allSignals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
   const rawPage = Number.parseInt(req.query.page, 10);
   const rawPageSize = Number.parseInt(req.query.pageSize, 10);
   const page = Number.isFinite(rawPage) && rawPage >= 0 ? rawPage : 0;
@@ -148,8 +168,7 @@ app.post("/api/parse", async (req, res) => {
 
 // --- AI briefing: LLM executive summary of the current signals (on demand) ---
 app.get("/api/briefing", async (_req, res) => {
-  const rules = await listRules();
-  const signals = detectSignals(getRows(), rules);
+  const signals = await getCachedSignals();
   res.json({ briefing: await generateBriefingLLM(signals) });
 });
 
@@ -157,8 +176,7 @@ app.get("/api/briefing", async (_req, res) => {
 app.post("/api/chat", async (req, res) => {
   const { question, history } = req.body || {};
   if (!question) return res.status(400).json({ error: "question required" });
-  const rules = await listRules();
-  const signals = detectSignals(getRows(), rules);
+  const [signals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
   const context = buildChatContext(getRows(), signals, rules);
   res.json({ answer: await answerQuestion(question, context, history || []) });
 });
@@ -200,19 +218,19 @@ app.delete("/api/signal-status/:key", async (req, res) => {
 
 // --- all signals (unpaginated, for export) ------------------------------
 app.get("/api/signals", async (req, res) => {
-  const rules = await listRules();
-  const all = detectSignals(getRows(), rules);
+  const all = await getCachedSignals();
   const type = (req.query.type || "").trim();
   res.json(type && type !== "all" ? all.filter((s) => s.type === type) : all);
 });
 
 // --- rule CRUD ----------------------------------------------------------
-app.get("/api/rules", async (_req, res) => res.json(await listRules()));
+app.get("/api/rules", async (_req, res) => res.json(await getCachedRules()));
 
 app.post("/api/rules", async (req, res) => {
   try {
     const rule = await insertRule(req.body);
     console.log("✅ Rule saved to DB:", JSON.stringify(rule));
+    invalidateSignalCache();
     res.json(rule);
   } catch (e) {
     console.error("❌ Rule save failed:", e.message);
@@ -220,19 +238,23 @@ app.post("/api/rules", async (req, res) => {
   }
 });
 
-app.put("/api/rules/:id", async (req, res) => res.json(await updateRule(req.params.id, req.body)));
+app.put("/api/rules/:id", async (req, res) => {
+  const rule = await updateRule(req.params.id, req.body);
+  invalidateSignalCache();
+  res.json(rule);
+});
 
 app.delete("/api/rules/:id", async (req, res) => {
   await deleteRule(req.params.id);
+  invalidateSignalCache();
   res.json({ ok: true });
 });
 
 
 // --- debug: inspect rules + signal counts in real time ------------------
 app.get("/api/debug", async (req, res) => {
-  const rules = await listRules();
+  const [allSignals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
   const rows = getRows();
-  const allSignals = detectSignals(rows, rules);
 
   const ruleDebug = rules.map((rule) => {
     const hits = allSignals.filter((s) => s.type === rule.name);
@@ -316,6 +338,9 @@ async function start() {
   }
   await loadDataFromMongo();
   await migrateRules();
+  // Warm up the cache so the first request is instant
+  await getCachedSignals();
+  console.log("✅ Signal cache warm");
   app.listen(PORT, () => console.log(`API ready on http://localhost:${PORT}`));
 }
 start();
