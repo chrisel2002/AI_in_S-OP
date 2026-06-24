@@ -329,7 +329,7 @@ export default function App() {
             </select>
 
             <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setExpanded(null); }}>
-              <option value="all">All statuses</option>
+              <option value="all">All status</option>
               <option value="open">Open (unmarked)</option>
               <option value="escalated">Escalated</option>
               <option value="actioned">Actioned</option>
