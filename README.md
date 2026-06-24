@@ -1,1 +1,1 @@
-This contains the codebase for the project AI in S&OP in collaboration with Thysenkrupp.
+This contains the codebase for the project AI in Supply and operations planning with the integration of LLM
