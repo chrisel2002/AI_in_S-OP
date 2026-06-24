@@ -491,8 +491,106 @@ const SNAP_METRIC_LABELS = {
   historic_sales_24_scheduling_agreement_in_tons: "Historic sched. agr. 24M",
 };
 
+const OP_WORD = { "<": "below", "<=": "at or below", ">": "above", ">=": "at or above", "==": "equal to" };
+const OP_SYM = { "<": "<", "<=": "≤", ">": ">", ">=": "≥", "==": "=" };
+const fmtTons = (n) => `${Number(n).toFixed(2)} t`;
+const metricLabel = (col) => SNAP_METRIC_LABELS[col] || col;
+
+// Renders one custom-rule condition as a comparison card, matching the look of
+// the built-in signal snapshots. Handles three shapes emitted by the server:
+// a fixed threshold, a ratio of another metric, or a percent-change vs baseline.
+function ConditionCard({ c }) {
+  const label = metricLabel(c.metric);
+  const opWord = OP_WORD[c.op] || c.op;
+
+  if (c.mode === "ratio") {
+    const baseLabel = metricLabel(c.baseline);
+    const isDirect = c.factor === 1; // bare metric-vs-metric comparison
+    const pct = (c.factor * 100).toFixed(0);
+    const refDesc = isDirect ? baseLabel : `${pct}% of ${baseLabel}`;
+    return (
+      <div className="snap-cond">
+        <div className="snap-compare">
+          <div className="snap-col snap-col-alert">
+            <div className="snap-col-date">{label}</div>
+            <div className="snap-col-val">{fmtTons(c.value)}</div>
+            <div className="snap-col-sub">This month</div>
+          </div>
+          <div className="snap-arrow">vs</div>
+          <div className="snap-col">
+            <div className="snap-col-date">{refDesc}</div>
+            <div className="snap-col-val">{fmtTons(c.reference)}</div>
+            <div className="snap-col-sub">Rule reference</div>
+          </div>
+        </div>
+        <div className="snap-verdict">
+          {fmtTons(c.value)} is {opWord} {refDesc} ({fmtTons(c.reference)})
+        </div>
+      </div>
+    );
+  }
+
+  if (c.mode === "percent") {
+    const baseLabel = metricLabel(c.baseline);
+    const up = c.pct >= 0;
+    return (
+      <div className="snap-cond">
+        <div className="snap-compare">
+          <div className="snap-col">
+            <div className="snap-col-date">{baseLabel}</div>
+            <div className="snap-col-val">{fmtTons(c.baselineValue)}</div>
+            <div className="snap-col-sub">Baseline</div>
+          </div>
+          <div className="snap-arrow">{up ? "▲" : "▼"}</div>
+          <div className="snap-col snap-col-alert">
+            <div className="snap-col-date">{label}</div>
+            <div className="snap-col-val">{fmtTons(c.value)}</div>
+            <div className="snap-col-sub">{up ? "+" : ""}{c.pct.toFixed(0)}% vs baseline</div>
+          </div>
+        </div>
+        <div className="snap-verdict">
+          {up ? "+" : ""}{c.pct.toFixed(0)}% change is {opWord} the {c.threshold}% threshold
+        </div>
+      </div>
+    );
+  }
+
+  // threshold (fixed numeric limit)
+  return (
+    <div className="snap-cond">
+      <div className="snap-compare">
+        <div className="snap-col snap-col-alert">
+          <div className="snap-col-date">{label}</div>
+          <div className="snap-col-val">{fmtTons(c.value)}</div>
+          <div className="snap-col-sub">This month</div>
+        </div>
+        <div className="snap-arrow">vs</div>
+        <div className="snap-col">
+          <div className="snap-col-date">Threshold</div>
+          <div className="snap-col-val">{OP_SYM[c.op] || c.op} {fmtTons(c.threshold)}</div>
+          <div className="snap-col-sub">Rule limit</div>
+        </div>
+      </div>
+      <div className="snap-verdict">
+        {fmtTons(c.value)} is {opWord} the {fmtTons(c.threshold)} threshold
+      </div>
+    </div>
+  );
+}
+
 function SnapshotView({ snap, s }) {
   if (!snap) return <p className="snap-fallback">{s.reasoning}</p>;
+
+  if (snap.kind === "conditions") {
+    return (
+      <div className="snap">
+        <div className="snap-meta">
+          {snap.logic === "OR" ? "Any of these conditions matched:" : "All of these conditions matched:"}
+        </div>
+        {snap.conditions.map((c, i) => <ConditionCard key={i} c={c} />)}
+      </div>
+    );
+  }
 
   if (snap.kind === "mom_change") {
     const up = snap.changePct > 0;

@@ -217,6 +217,74 @@ function evalCondition(r, cond) {
   return { passes: op(value, Number(cond.threshold)), value };
 }
 
+// Decompose a simple AI formula — a chain of "row.col OP value" terms joined by
+// && or || — into structured comparison conditions so custom-rule signals get
+// the same visual snapshot as the built-in detectors. Returns null when the
+// formula is too complex to map cleanly onto comparison cards (parentheses,
+// mixed &&/|| since precedence can't be shown in a flat list, or unknown RHS
+// shapes), in which case the caller falls back to the raw formula + value table.
+function buildFormulaConditions(row, formula) {
+  if (/[()]/.test(formula)) return null;
+  const hasAnd = formula.includes("&&");
+  const hasOr = formula.includes("||");
+  if (hasAnd && hasOr) return null; // mixed logic → can't represent precedence in flat cards
+  const logic = hasOr ? "OR" : "AND";
+  const terms = formula.split(/\s*(?:&&|\|\|)\s*/).map((t) => t.trim()).filter(Boolean);
+  if (!terms.length) return null;
+  const conditions = [];
+  for (const term of terms) {
+    const m = term.match(/^row\.(\w+)\s*(<=|>=|<|>|===?)\s*(.+)$/);
+    if (!m) return null;
+    const metric = m[1];
+    const op = m[2] === "===" ? "==" : m[2];
+    const rhs = m[3].trim();
+    const value = row[metric];
+    if (value == null) return null;
+    const num = rhs.match(/^([\d.]+)$/);
+    const fc1 = rhs.match(/^([\d.]+)\s*\*\s*row\.(\w+)$/);
+    const fc2 = rhs.match(/^row\.(\w+)\s*\*\s*([\d.]+)$/);
+    const bare = rhs.match(/^row\.(\w+)$/);
+    if (num) {
+      conditions.push({ mode: "threshold", metric, value, op, threshold: Number(num[1]) });
+    } else if (fc1 || fc2 || bare) {
+      const factor = bare ? 1 : Number(fc1 ? fc1[1] : fc2[2]);
+      const baseline = bare ? bare[1] : (fc1 ? fc1[2] : fc2[1]);
+      const baselineValue = row[baseline];
+      if (baselineValue == null) return null;
+      conditions.push({ mode: "ratio", metric, value, op, factor, baseline, baselineValue, reference: factor * baselineValue });
+    } else {
+      return null;
+    }
+  }
+  return { logic, conditions };
+}
+
+// Same idea for structured (non-formula) custom rules built from groups/conditions.
+function buildStructuredConditions(row, groups, groupLogic) {
+  const conditions = [];
+  for (const group of groups) {
+    for (const cond of group.conditions || []) {
+      const value = row[cond.metric];
+      if (value == null) return null;
+      if (cond.comparison_type === "percent_change") {
+        const baseline = resolveColumn(cond.baseline);
+        const baselineValue = baseline ? row[baseline] : null;
+        if (!baselineValue) return null;
+        conditions.push({
+          mode: "percent", metric: cond.metric, value, op: cond.operator,
+          threshold: Number(cond.threshold), baseline, baselineValue,
+          pct: ((value - baselineValue) / baselineValue) * 100,
+        });
+      } else {
+        conditions.push({ mode: "threshold", metric: cond.metric, value, op: cond.operator, threshold: Number(cond.threshold) });
+      }
+    }
+  }
+  if (!conditions.length) return null;
+  const logic = groups.length > 1 ? (groupLogic || "OR") : (groups[0]?.logic || "AND");
+  return { logic, conditions };
+}
+
 // Returns ALL matching rows as individual signals (not just the single worst)
 function detectCustomRule(months, rule) {
   const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 65 : 50;
@@ -226,8 +294,17 @@ function detectCustomRule(months, rule) {
   if (rule.formula) {
     for (const r of months) {
       if (!evalFormula(r, rule.formula)) continue;
-      const vals = {};
-      for (const col of Object.keys(METRICS)) if (r[col] != null) vals[col] = r[col];
+      // Prefer a structured comparison snapshot (matches the built-in signal
+      // look); fall back to the raw formula + values table if it can't be parsed.
+      const parsed = buildFormulaConditions(r, rule.formula);
+      let snapshot;
+      if (parsed) {
+        snapshot = { kind: "conditions", logic: parsed.logic, conditions: parsed.conditions, formula: rule.formula };
+      } else {
+        const vals = {};
+        for (const col of Object.keys(METRICS)) if (r[col] != null) vals[col] = r[col];
+        snapshot = { kind: "formula", formula: rule.formula, values: vals };
+      }
       results.push(baseSignal(r, {
         type: rule.name || "Custom rule",
         month: r.date,
@@ -236,7 +313,7 @@ function detectCustomRule(months, rule) {
         detail: rule.detail_label || "Formula condition matched",
         reasoning: rule.raw_sentence || rule.formula,
         actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
-        snapshot: { kind: "formula", formula: rule.formula, values: vals },
+        snapshot,
       }));
     }
     return results;
@@ -270,6 +347,7 @@ function detectCustomRule(months, rule) {
     if (!passes) continue;
 
     const totalConds = groups.reduce((s, g) => s + (g.conditions?.length || 0), 0);
+    const structured = buildStructuredConditions(r, groups, groupLogic);
     results.push(baseSignal(r, {
       type: rule.name || "Custom rule",
       month: r.date,
@@ -278,6 +356,7 @@ function detectCustomRule(months, rule) {
       detail: `${groups.length} group(s), ${totalConds} condition(s) matched`,
       reasoning: rule.raw_sentence || `Custom rule: ${groups.length} group(s).`,
       actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
+      ...(structured ? { snapshot: { kind: "conditions", logic: structured.logic, conditions: structured.conditions } } : {}),
     }));
   }
 
