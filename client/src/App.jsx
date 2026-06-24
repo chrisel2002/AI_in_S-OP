@@ -59,6 +59,57 @@ function BarChart({ data, colorClassMap, fallbackClasses }) {
   );
 }
 
+// Matches signal mentions in briefing prose, e.g. "Material 12345, Plant 1000"
+// (template) or "material 12345, plant 1000" (LLM). Tolerates an optional comma
+// and an optional "#" before the numbers.
+const SIGNAL_MENTION_RE = /(material)\s+#?(\d+)\s*,?\s+(plant)\s+#?(\d+)/gi;
+
+// Pick the signal a briefing mention refers to. allSignals is sorted by score
+// desc, so the first material+plant match is the highest-priority one — which is
+// exactly what the "top signals" briefing calls out.
+function findMentionedSignal(signals, material, plant) {
+  return (
+    signals.find(
+      (s) => Number(s.material) === Number(material) && Number(s.plant) === Number(plant)
+    ) || null
+  );
+}
+
+// Renders the briefing text, turning each signal mention into a clickable link
+// that jumps to the matching row in the table below. Mentions with no matching
+// signal are left as plain text. Newlines are preserved via CSS white-space.
+function InteractiveBriefing({ text, signals, onPick }) {
+  if (!text) return null;
+  const parts = [];
+  const re = new RegExp(SIGNAL_MENTION_RE); // fresh lastIndex
+  let last = 0;
+  let key = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const [full, , material, , plant] = m;
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const sig = findMentionedSignal(signals, material, plant);
+    if (sig) {
+      parts.push(
+        <button
+          key={`sig-${key++}`}
+          type="button"
+          className="briefing-signal-link"
+          onClick={() => onPick(sig)}
+          title={`Go to signal: ${sig.type} — Material ${sig.material}, Plant ${sig.plant}`}
+        >
+          {full}
+        </button>
+      );
+    } else {
+      parts.push(full);
+    }
+    last = m.index + full.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
+}
+
 export default function App() {
   const [dash, setDash] = useState(null);
   const [allSignals, setAllSignals] = useState([]);
@@ -72,6 +123,8 @@ export default function App() {
   const [aiBriefing, setAiBriefing] = useState(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [statuses, setStatuses] = useState({});
+  const [highlightId, setHighlightId] = useState(null);
+  const [scrollTarget, setScrollTarget] = useState(null);
   const PAGE_SIZE = 100;
 
   async function regenerateBriefing() {
@@ -98,6 +151,32 @@ export default function App() {
     refresh({ fetchRules: true });
     getSignalStatuses().then(setStatuses).catch(() => {});
   }, []);
+
+  // Scroll to (and briefly highlight) a signal row after a briefing link is clicked.
+  // Runs after the page/expanded state has committed so the target row is mounted.
+  useEffect(() => {
+    if (scrollTarget == null) return;
+    const el = document.getElementById(`signal-row-${scrollTarget}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = setTimeout(() => setHighlightId(null), 2400);
+    setScrollTarget(null);
+    return () => clearTimeout(t);
+  }, [scrollTarget]);
+
+  // Jump from a briefing mention to the matching signal in the table below.
+  function goToSignal(sig) {
+    if (!sig) return;
+    // Clear filters so the signal is guaranteed to be visible, then locate its page.
+    setTypeFilter("all");
+    setUrgencyFilter("all");
+    setStatusFilter("all");
+    const idx = allSignals.findIndex((x) => x.id === sig.id);
+    if (idx === -1) return;
+    setPage(Math.floor(idx / PAGE_SIZE));
+    setExpanded(sig.id);
+    setHighlightId(sig.id);
+    setScrollTarget(sig.id);
+  }
 
   async function handleSetStatus(key, status) {
     await setSignalStatus(key, status);
@@ -203,7 +282,11 @@ export default function App() {
           </button>
         </div>
         <div className="briefing-box-text">
-          {aiBriefing || dash.briefing}
+          <InteractiveBriefing
+            text={aiBriefing || dash.briefing}
+            signals={allSignals}
+            onPick={goToSignal}
+          />
         </div>
       </div>
 
@@ -359,6 +442,7 @@ export default function App() {
                   <Row
                     key={s.id}
                     s={s}
+                    highlighted={highlightId === s.id}
                     expanded={expanded === s.id}
                     onToggle={() => setExpanded(expanded === s.id ? null : s.id)}
                     signalStatus={statuses[s.key]?.status || null}
@@ -560,7 +644,7 @@ function ActionList({ text, loading }) {
   );
 }
 
-function Row({ s, expanded, onToggle, signalStatus, onSetStatus, onClearStatus }) {
+function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, onClearStatus }) {
   const [aiActions, setAiActions] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
@@ -593,7 +677,12 @@ function Row({ s, expanded, onToggle, signalStatus, onSetStatus, onClearStatus }
 
   return (
     <>
-      <tr className="signal-row" onClick={onToggle} style={{ cursor: "pointer" }}>
+      <tr
+        id={`signal-row-${s.id}`}
+        className={`signal-row${highlighted ? " signal-row-highlight" : ""}`}
+        onClick={onToggle}
+        style={{ cursor: "pointer" }}
+      >
         <td>
           <span className={`pill ${pillClass}`}>{s.type}</span>
           {signalStatus && <span className={`status-badge status-${signalStatus}`}>{signalStatus}</span>}

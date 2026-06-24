@@ -37,8 +37,15 @@ export async function generateBriefingLLM(signals) {
           "Use this exact format — plain text, no markdown:\n\n" +
           "Line 1: One sentence summarising the overall situation.\n\n" +
           "Then 2-3 focus points, each on its own line starting with '• '.\n" +
-          "Each point names the issue, why it matters, and what the team should do.\n" +
-          "Keep it practical, specific, and under 80 words total.",
+          "Each point names the issue, why it matters, and what the team should do.\n\n" +
+          "CRITICAL — referencing signals: each focus point must call out ONE specific signal, " +
+          "and you must refer to it using the EXACT phrase \"Material <material>, Plant <plant>\" " +
+          "(e.g. \"Material 11681, Plant 28\"), copying the material and plant numbers verbatim from " +
+          "the signal list below. The dashboard turns this exact phrase into a clickable link, so it " +
+          "must match character-for-character: always one material and one plant, comma-separated, no " +
+          "ranges, no 'plants 28 and 30', no lists of materials. If two signals matter, write two " +
+          "separate focus points.\n\n" +
+          "Keep it practical, specific, and under 90 words total.",
       },
       {
         role: "user",

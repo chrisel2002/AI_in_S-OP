@@ -44,6 +44,19 @@ body {
 .briefing-box-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .briefing-box-title { font-size: 12px; font-weight: 700; color: var(--tk-blue); text-transform: uppercase; letter-spacing: .05em; }
 .briefing-box-text { font-size: 13.5px; color: var(--text); line-height: 1.8; white-space: pre-line; }
+.briefing-signal-link {
+  background: none; border: none; padding: 0 1px; margin: 0; font: inherit;
+  color: var(--tk-blue); font-weight: 600; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px;
+}
+.briefing-signal-link:hover { color: #0a6aa0; background: rgba(0, 149, 216, .12); border-radius: 3px; }
+
+/* Brief flash when a briefing link jumps you to a signal row */
+@keyframes rowFlash {
+  0%   { background: var(--blue-bg); }
+  100% { background: transparent; }
+}
+.signal-row-highlight > td { animation: rowFlash 2.4s ease-out; }
 
 /* ===== KPI cards ===== */
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
