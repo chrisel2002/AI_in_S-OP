@@ -297,7 +297,7 @@ export default function App() {
           <div className="metric-val">{k.total}</div>
         </div>
         <div className="metric">
-          <div className="metric-label">Critical (score ≥ 85)</div>
+          <div className="metric-label">High (score ≥ 85)</div>
           <div className="metric-val red">{k.critical}</div>
         </div>
         <div className="metric">

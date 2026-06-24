@@ -25,7 +25,7 @@ const METRIC_COLUMNS = [
 const DIMENSIONS  = ["material", "material_group", "material_division", "plant", "plant_group", "sales_office", "sales_office_group"];
 const OPERATORS   = [">", ">=", "<", "<=", "=="];
 const COMPARISONS = ["absolute", "percent_change"];
-const SEVERITIES  = ["info", "warning", "critical"];
+const SEVERITIES  = ["low", "medium", "high"];
 
 // ── Call 1: structured fields ─────────────────────────────────────────────
 const STRUCT_PROMPT = `You convert a planner's plain-English rule into a JSON object for an S&OP signal engine.
@@ -38,19 +38,19 @@ Return ONLY a JSON object with these fields:
 - "operator": ">", ">=", "<", "<=", or "=="
 - "threshold": a number
 - "group_by": [] or subset of ${JSON.stringify(DIMENSIONS)}
-- "severity": "info", "warning", or "critical"
+- "severity": "low", "medium", or "high"
 - "detail_label": one short plain-text sentence describing what triggered
 
 Guidance:
 - "forecast"/"planned" → sales_free_stock_in_tons; "contract" → sales_contracts_in_tons; "inventory"/"stock" → historic_inventory_12_free_stock_in_tons.
 - "above/over/exceeds" → ">"; "below/under/less than" → "<".
 - "%" or "percent" → percent_change with a sensible historic baseline.
-- "critical/urgent" → "critical"; otherwise "warning".
+- "critical/urgent/high" → "high"; "low/minor" → "low"; otherwise "medium".
 - For complex multi-column rules, pick the PRIMARY metric and approximate the threshold.
 
 Example:
 Input: "Flag when forecast is above 10 tons"
-Output: {"name":"High forecast","metric":"sales_free_stock_in_tons","comparison_type":"absolute","baseline":null,"operator":">","threshold":10,"group_by":[],"severity":"warning","detail_label":"Forecast free stock above 10t"}`;
+Output: {"name":"High forecast","metric":"sales_free_stock_in_tons","comparison_type":"absolute","baseline":null,"operator":">","threshold":10,"group_by":[],"severity":"medium","detail_label":"Forecast free stock above 10t"}`;
 
 // ── Call 2: formula generation ────────────────────────────────────────────
 const FORMULA_PROMPT = `You write JavaScript boolean expressions for an S&OP planning engine.
@@ -95,7 +95,7 @@ function extractJson(text) {
 
 function normalizeStructured(raw, sentence) {
   const name         = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : sentence.slice(0, 48);
-  const severity     = SEVERITIES.includes(raw.severity) ? raw.severity : "warning";
+  const severity     = SEVERITIES.includes(raw.severity) ? raw.severity : "medium";
   const group_by     = Array.isArray(raw.group_by) ? raw.group_by.filter((d) => DIMENSIONS.includes(d)) : [];
   const detail_label = typeof raw.detail_label === "string" ? raw.detail_label.trim() : name;
   const metric       = METRIC_COLUMNS.includes(raw.metric) ? raw.metric : "sales_free_stock_in_tons";
@@ -177,7 +177,7 @@ export function parseMock(sentence) {
   let group_by = [];
   if (t.includes("material")) group_by = ["material"];
   else if (t.includes("plant")) group_by = ["plant"];
-  const severity = /critical|urgent|severe/.test(t) ? "critical" : "warning";
+  const severity = /critical|urgent|severe|high/.test(t) ? "high" : /\blow\b|minor|info/.test(t) ? "low" : "medium";
   const name     = sentence.length > 48 ? sentence.slice(0, 48) + "…" : sentence;
   return { name, metric, comparison_type: isPercent ? "percent_change" : "absolute", baseline: isPercent ? baselineFor(metric, t) : null, operator, threshold, group_by, severity, detail_label: name, raw_sentence: sentence, active: true };
 }

@@ -179,7 +179,7 @@ const OPERATORS = {
   "is less or equal": "<=",
   "equals": "==",
 };
-const SEVERITIES = ["info", "warning", "critical"];
+const SEVERITIES = ["low", "medium", "high"];
 
 const labelFor = (obj, val, fallback) =>
   Object.keys(obj).find((k) => obj[k] === val) || fallback;
@@ -205,7 +205,7 @@ const EMPTY_DRAFT = () => ({
   name: "",
   groups: [EMPTY_GROUP()],
   groupLogic: "OR",
-  severity: "warning",
+  severity: "medium",
   group_by: [],
   raw_sentence: "",
   active: true,
@@ -242,9 +242,9 @@ function draftFromExisting(existing) {
 }
 
 const SEV_STYLE = {
-  info:     { bg: "var(--blue-bg)",  border: "var(--blue-border)",  color: "var(--blue)"  },
-  warning:  { bg: "#fef3c7",         border: "#fcd34d",             color: "#92400e"       },
-  critical: { bg: "var(--red-bg)",   border: "#fca5a5",             color: "var(--red)"   },
+  low:    { bg: "var(--blue-bg)",  border: "var(--blue-border)",  color: "var(--blue)"  },
+  medium: { bg: "#fef3c7",         border: "#fcd34d",             color: "#92400e"       },
+  high:   { bg: "var(--red-bg)",   border: "#fca5a5",             color: "var(--red)"   },
 };
 
 function ConditionRow({ cond, total, onUpdate, onRemove }) {
@@ -571,7 +571,7 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
                 className="rb-textarea"
                 rows={4}
                 value={sentence}
-                placeholder={'e.g. "Flag as critical when forecast sales are more than 20% above historic 12-month sales per material"'}
+                placeholder={'e.g. "Flag as high severity when forecast sales are more than 20% above historic 12-month sales per material"'}
                 onChange={(e) => { setSentence(e.target.value); setPromptHint(null); }}
                 onKeyDown={(e) => e.key === "Enter" && e.metaKey && generate()}
                 autoFocus

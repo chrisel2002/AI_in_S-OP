@@ -287,7 +287,11 @@ function buildStructuredConditions(row, groups, groupLogic) {
 
 // Returns ALL matching rows as individual signals (not just the single worst)
 function detectCustomRule(months, rule) {
-  const score = rule.severity === "critical" ? 90 : rule.severity === "warning" ? 65 : 50;
+  // Accept both the current low/medium/high labels and the legacy info/warning/
+  // critical values that may still be stored on older rules.
+  const score = ["high", "critical"].includes(rule.severity) ? 90
+    : ["medium", "warning"].includes(rule.severity) ? 65
+    : 50;
   const results = [];
 
   // ── Formula path (AI-generated arbitrary expression) ────────────────────
