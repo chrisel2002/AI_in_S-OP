@@ -3,12 +3,14 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 
-import { loadDataFromMongo, getRows } from "./data.js";
+import { loadDataFromMongo, getRows, updateRowById } from "./data.js";
 import { detectSignals, buildDashboard } from "./signals.js";
 import { generateBriefing, generateBriefingLLM } from "./briefing.js";
-import { parseSentence } from "./parser.js";
+import { parseSentence, checkPromptClarity } from "./parser.js";
+import { getAllStatuses, upsertStatus, removeStatus } from "./status.js";
 import { suggestActions } from "./suggest.js";
 import { buildChatContext, answerQuestion } from "./chat.js";
+import { chatLLM, llmEnabled } from "./llm.js";
 import {
   initStore,
   storageBackend,
@@ -24,6 +26,32 @@ const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/sop";
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// --- signal cache -----------------------------------------------------------
+// Promise-based: concurrent requests share the same in-flight rebuild.
+// Immediately restarts the rebuild after any rule mutation so the next
+// request almost always hits a warm cache.
+let _rulesPromise = null;
+let _signalsPromise = null;
+
+function getCachedRules() {
+  if (!_rulesPromise) _rulesPromise = listRules();
+  return _rulesPromise;
+}
+
+function getCachedSignals() {
+  if (!_signalsPromise)
+    _signalsPromise = getCachedRules().then((rules) => detectSignals(getRows(), rules));
+  return _signalsPromise;
+}
+
+function invalidateAndRebuild() {
+  _rulesPromise = listRules();
+  _signalsPromise = _rulesPromise.then((rules) => detectSignals(getRows(), rules));
+  _signalsPromise
+    .then(() => console.log("✅ Signal cache rebuilt"))
+    .catch(() => { _signalsPromise = null; });
+}
 
 // --- dashboard: signals + KPIs + briefing -------------------------------
 // app.get("/api/dashboard", async (req, res) => {
@@ -54,26 +82,11 @@ app.use(express.json());
 // });
 // ✅ FIXED
 app.get("/api/dashboard", async (req, res) => {
-  const rules = await listRules();
-  const allSignals = detectSignals(getRows(), rules);  // ← rename to allSignals
-  const rawPage = Number.parseInt(req.query.page, 10);
-  const rawPageSize = Number.parseInt(req.query.pageSize, 10);
-  const page = Number.isFinite(rawPage) && rawPage >= 0 ? rawPage : 0;
-  const pageSize = Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.min(rawPageSize, 200) : 100;
-
-  const typeFilter = (req.query.type || "").trim();
-  const filteredSignals = typeFilter && typeFilter !== "all"
-    ? allSignals.filter((s) => s.type === typeFilter)
-    : allSignals;
-
-  const dash = buildDashboard(filteredSignals, rules.filter((r) => r.active !== false).length, {
-    page,
-    pageSize,
-    allSignals,
-  });
-
+  const [allSignals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
+  const dash = buildDashboard(allSignals, rules.filter((r) => r.active !== false).length, { allSignals });
   res.json({
     ...dash,
+    allSignals,           // full list — client handles filtering + pagination
     briefing: generateBriefing(allSignals),
     storage: storageBackend(),
   });
@@ -130,6 +143,13 @@ app.get("/api/orders", async (req, res) => {
   });
 });
 
+// --- prompt clarity check (before full parse) ---------------------------
+app.post("/api/validate-prompt", async (req, res) => {
+  const { sentence } = req.body;
+  if (!sentence) return res.status(400).json({ clear: false, suggestion: "Please enter a rule description." });
+  res.json(await checkPromptClarity(sentence));
+});
+
 // --- natural language -> rule draft -------------------------------------
 app.post("/api/parse", async (req, res) => {
   const { sentence } = req.body;
@@ -139,8 +159,7 @@ app.post("/api/parse", async (req, res) => {
 
 // --- AI briefing: LLM executive summary of the current signals (on demand) ---
 app.get("/api/briefing", async (_req, res) => {
-  const rules = await listRules();
-  const signals = detectSignals(getRows(), rules);
+  const signals = await getCachedSignals();
   res.json({ briefing: await generateBriefingLLM(signals) });
 });
 
@@ -148,8 +167,7 @@ app.get("/api/briefing", async (_req, res) => {
 app.post("/api/chat", async (req, res) => {
   const { question, history } = req.body || {};
   if (!question) return res.status(400).json({ error: "question required" });
-  const rules = await listRules();
-  const signals = detectSignals(getRows(), rules);
+  const [signals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
   const context = buildChatContext(getRows(), signals, rules);
   res.json({ answer: await answerQuestion(question, context, history || []) });
 });
@@ -176,13 +194,34 @@ app.post("/api/suggest", async (req, res) => {
   res.json({ actions: await suggestActions(signal, orderSummary) });
 });
 
+// --- signal status CRUD -------------------------------------------------
+app.get("/api/signal-status", async (_req, res) => res.json(await getAllStatuses()));
+
+app.put("/api/signal-status/:key", async (req, res) => {
+  await upsertStatus(decodeURIComponent(req.params.key), req.body);
+  res.json({ ok: true });
+});
+
+app.delete("/api/signal-status/:key", async (req, res) => {
+  await removeStatus(decodeURIComponent(req.params.key));
+  res.json({ ok: true });
+});
+
+// --- all signals (unpaginated, for export) ------------------------------
+app.get("/api/signals", async (req, res) => {
+  const all = await getCachedSignals();
+  const type = (req.query.type || "").trim();
+  res.json(type && type !== "all" ? all.filter((s) => s.type === type) : all);
+});
+
 // --- rule CRUD ----------------------------------------------------------
-app.get("/api/rules", async (_req, res) => res.json(await listRules()));
+app.get("/api/rules", async (_req, res) => res.json(await getCachedRules()));
 
 app.post("/api/rules", async (req, res) => {
   try {
     const rule = await insertRule(req.body);
     console.log("✅ Rule saved to DB:", JSON.stringify(rule));
+    invalidateAndRebuild();
     res.json(rule);
   } catch (e) {
     console.error("❌ Rule save failed:", e.message);
@@ -190,19 +229,188 @@ app.post("/api/rules", async (req, res) => {
   }
 });
 
-app.put("/api/rules/:id", async (req, res) => res.json(await updateRule(req.params.id, req.body)));
+app.put("/api/rules/:id", async (req, res) => {
+  const rule = await updateRule(req.params.id, req.body);
+  invalidateAndRebuild();
+  res.json(rule);
+});
 
 app.delete("/api/rules/:id", async (req, res) => {
   await deleteRule(req.params.id);
+  invalidateAndRebuild();
   res.json({ ok: true });
 });
 
 
+// ---- editable-field whitelist (backend source of truth) ----------------
+// To allow more fields in the future, add them here only.
+const ALLOWED_EDITABLE_FIELDS = new Set([
+  "sales_free_stock_in_tons",
+  "sales_contracts_in_tons",
+  "sales_scheduling_agreement_in_tons",
+]);
+
+function sanitizeChanges(changes) {
+  if (!changes || typeof changes !== "object" || Array.isArray(changes)) return null;
+  const result = {};
+  for (const [key, value] of Object.entries(changes)) {
+    if (ALLOWED_EDITABLE_FIELDS.has(key) && Number.isFinite(Number(value))) {
+      result[key] = Number(value);
+    }
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// --- PATCH: save edited planning values and recalculate signal ----------
+app.patch("/api/dashboard/signals/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid signal ID" });
+  }
+
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return res.status(400).json({ error: "Request body must be a JSON object" });
+  }
+
+  // Reject unknown / non-editable fields
+  const unknown = Object.keys(body).filter((k) => !ALLOWED_EDITABLE_FIELDS.has(k));
+  if (unknown.length > 0) {
+    return res.status(400).json({ error: `Non-editable fields not allowed: ${unknown.join(", ")}` });
+  }
+
+  // Validate and normalise to numbers
+  const updates = {};
+  for (const [key, raw] of Object.entries(body)) {
+    const num = Number(raw);
+    if (!Number.isFinite(num)) {
+      return res.status(400).json({ error: `Invalid value for "${key}": must be a finite number` });
+    }
+    updates[key] = num;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: "No valid fields to update" });
+  }
+
+  try {
+    const coll = mongoose.connection.db.collection("sales_operations_tool");
+    const updated = await coll.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(id) },
+      { $set: updates },
+      { returnDocument: "after" }
+    );
+
+    if (!updated) return res.status(404).json({ error: "Row not found" });
+
+    // Patch the in-memory row so subsequent detection uses fresh values
+    updateRowById(id, updates);
+
+    // Recompute signals from the updated in-memory rows and refresh the cache
+    const rules = await getCachedRules();
+    const newSignals = detectSignals(getRows(), rules);
+    // Replace cache directly — no background rebuild needed
+    _signalsPromise = Promise.resolve(newSignals);
+
+    // Return the signal(s) whose source row is this document
+    const signal = newSignals.find((s) => s._id === id) || null;
+    res.json({ signal });
+  } catch (e) {
+    console.error("PATCH signal error:", e.message);
+    res.status(500).json({ error: "Failed to update signal row" });
+  }
+});
+
+// --- POST: AI recommendations for one signal row -----------------------
+app.post("/api/dashboard/signals/:id/ai-recommendations", async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid signal ID" });
+  }
+  if (!llmEnabled()) {
+    return res.json({ recommendations: [] });
+  }
+
+  try {
+    const coll = mongoose.connection.db.collection("sales_operations_tool");
+    const doc = await coll.findOne({ _id: new mongoose.Types.ObjectId(id) });
+    if (!doc) return res.status(404).json({ error: "Row not found" });
+
+    // Find the cached signal for this row to provide computed context
+    const signals = await getCachedSignals();
+    const sig = signals.find((s) => s._id === id);
+
+    const editableList = [...ALLOWED_EDITABLE_FIELDS].join(", ");
+    const raw = await chatLLM(
+      [
+        {
+          role: "system",
+          content: `You are an S&OP planning assistant. Analyze the given demand-plan signal and return a JSON object with EXACTLY this structure — no preamble, no markdown fences, valid JSON only:
+{"recommendations":[{"text":"...","changes":null},{"text":"...","changes":{"sales_free_stock_in_tons":5.2}}]}
+
+Rules:
+- Include 3 to 5 recommendations.
+- Some may be text-only observations or action items (set changes to null).
+- If you suggest changing a numeric planning field, include it in "changes" as a number.
+- Only use these field names inside "changes": ${editableList}.
+- Do not invent other field names.
+- Write each "text" as a natural sentence. Do not include labels like "Field:", "Current:", "Suggested:".
+- Return ONLY valid JSON, nothing else.`,
+        },
+        {
+          role: "user",
+          content: `Signal: ${sig?.type || "Unknown"} (score: ${sig?.score ?? "?"}, priority: ${sig?.priority ?? "?"})
+Material: ${doc.material}, Plant: ${doc.plant}, Sales Office: ${doc.sales_office}, Month: ${String(doc.date).slice(0, 10)}
+Detail: ${sig?.detail || ""}
+Reasoning: ${sig?.reasoning || ""}
+
+Current planning values:
+- Sales Free Stock: ${doc.sales_free_stock_in_tons}t
+- Sales Contracts: ${doc.sales_contracts_in_tons}t
+- Sales Scheduling Agreement: ${doc.sales_scheduling_agreement_in_tons}t
+
+Historic reference (free stock):
+- 12M historic sales: ${doc.historic_sales_12_free_stock_in_tons}t
+- 24M historic sales: ${doc.historic_sales_24_free_stock_in_tons}t
+- 12M historic inventory: ${doc.historic_inventory_12_free_stock_in_tons}t`,
+        },
+      ],
+      { temperature: 0.5 }
+    );
+
+    // Parse — try direct JSON, then try extracting the first {...} block
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) {
+        try { parsed = JSON.parse(m[0]); } catch { /* fall through */ }
+      }
+    }
+
+    if (!parsed || !Array.isArray(parsed.recommendations)) {
+      return res.json({ recommendations: [] });
+    }
+
+    const recommendations = parsed.recommendations
+      .filter((r) => r && typeof r.text === "string" && r.text.trim())
+      .map((r) => ({
+        text: String(r.text).trim().slice(0, 600),
+        changes: sanitizeChanges(r.changes),
+      }));
+
+    res.json({ recommendations });
+  } catch (e) {
+    console.error("AI recs error:", e.message);
+    res.json({ recommendations: [], error: "AI recommendations unavailable" });
+  }
+});
+
 // --- debug: inspect rules + signal counts in real time ------------------
 app.get("/api/debug", async (req, res) => {
-  const rules = await listRules();
+  const [allSignals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
   const rows = getRows();
-  const allSignals = detectSignals(rows, rules);
 
   const ruleDebug = rules.map((rule) => {
     const hits = allSignals.filter((s) => s.type === rule.name);
@@ -286,6 +494,9 @@ async function start() {
   }
   await loadDataFromMongo();
   await migrateRules();
+  // Warm up the cache so the first request is instant
+  await getCachedSignals();
+  console.log("✅ Signal cache warm");
   app.listen(PORT, () => console.log(`API ready on http://localhost:${PORT}`));
 }
 start();
