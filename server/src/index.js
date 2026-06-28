@@ -3,13 +3,14 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 
-import { loadDataFromMongo, getRows } from "./data.js";
+import { loadDataFromMongo, getRows, updateRowById } from "./data.js";
 import { detectSignals, buildDashboard } from "./signals.js";
 import { generateBriefing, generateBriefingLLM } from "./briefing.js";
 import { parseSentence, checkPromptClarity } from "./parser.js";
 import { getAllStatuses, upsertStatus, removeStatus } from "./status.js";
 import { suggestActions } from "./suggest.js";
 import { buildChatContext, answerQuestion } from "./chat.js";
+import { chatLLM, llmEnabled } from "./llm.js";
 import {
   initStore,
   storageBackend,
@@ -240,6 +241,171 @@ app.delete("/api/rules/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
+
+// ---- editable-field whitelist (backend source of truth) ----------------
+// To allow more fields in the future, add them here only.
+const ALLOWED_EDITABLE_FIELDS = new Set([
+  "sales_free_stock_in_tons",
+  "sales_contracts_in_tons",
+  "sales_scheduling_agreement_in_tons",
+]);
+
+function sanitizeChanges(changes) {
+  if (!changes || typeof changes !== "object" || Array.isArray(changes)) return null;
+  const result = {};
+  for (const [key, value] of Object.entries(changes)) {
+    if (ALLOWED_EDITABLE_FIELDS.has(key) && Number.isFinite(Number(value))) {
+      result[key] = Number(value);
+    }
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// --- PATCH: save edited planning values and recalculate signal ----------
+app.patch("/api/dashboard/signals/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid signal ID" });
+  }
+
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return res.status(400).json({ error: "Request body must be a JSON object" });
+  }
+
+  // Reject unknown / non-editable fields
+  const unknown = Object.keys(body).filter((k) => !ALLOWED_EDITABLE_FIELDS.has(k));
+  if (unknown.length > 0) {
+    return res.status(400).json({ error: `Non-editable fields not allowed: ${unknown.join(", ")}` });
+  }
+
+  // Validate and normalise to numbers
+  const updates = {};
+  for (const [key, raw] of Object.entries(body)) {
+    const num = Number(raw);
+    if (!Number.isFinite(num)) {
+      return res.status(400).json({ error: `Invalid value for "${key}": must be a finite number` });
+    }
+    updates[key] = num;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: "No valid fields to update" });
+  }
+
+  try {
+    const coll = mongoose.connection.db.collection("sales_operations_tool");
+    const updated = await coll.findOneAndUpdate(
+      { _id: new mongoose.Types.ObjectId(id) },
+      { $set: updates },
+      { returnDocument: "after" }
+    );
+
+    if (!updated) return res.status(404).json({ error: "Row not found" });
+
+    // Patch the in-memory row so subsequent detection uses fresh values
+    updateRowById(id, updates);
+
+    // Recompute signals from the updated in-memory rows and refresh the cache
+    const rules = await getCachedRules();
+    const newSignals = detectSignals(getRows(), rules);
+    // Replace cache directly — no background rebuild needed
+    _signalsPromise = Promise.resolve(newSignals);
+
+    // Return the signal(s) whose source row is this document
+    const signal = newSignals.find((s) => s._id === id) || null;
+    res.json({ signal });
+  } catch (e) {
+    console.error("PATCH signal error:", e.message);
+    res.status(500).json({ error: "Failed to update signal row" });
+  }
+});
+
+// --- POST: AI recommendations for one signal row -----------------------
+app.post("/api/dashboard/signals/:id/ai-recommendations", async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid signal ID" });
+  }
+  if (!llmEnabled()) {
+    return res.json({ recommendations: [] });
+  }
+
+  try {
+    const coll = mongoose.connection.db.collection("sales_operations_tool");
+    const doc = await coll.findOne({ _id: new mongoose.Types.ObjectId(id) });
+    if (!doc) return res.status(404).json({ error: "Row not found" });
+
+    // Find the cached signal for this row to provide computed context
+    const signals = await getCachedSignals();
+    const sig = signals.find((s) => s._id === id);
+
+    const editableList = [...ALLOWED_EDITABLE_FIELDS].join(", ");
+    const raw = await chatLLM(
+      [
+        {
+          role: "system",
+          content: `You are an S&OP planning assistant. Analyze the given demand-plan signal and return a JSON object with EXACTLY this structure — no preamble, no markdown fences, valid JSON only:
+{"recommendations":[{"text":"...","changes":null},{"text":"...","changes":{"sales_free_stock_in_tons":5.2}}]}
+
+Rules:
+- Include 3 to 5 recommendations.
+- Some may be text-only observations or action items (set changes to null).
+- If you suggest changing a numeric planning field, include it in "changes" as a number.
+- Only use these field names inside "changes": ${editableList}.
+- Do not invent other field names.
+- Write each "text" as a natural sentence. Do not include labels like "Field:", "Current:", "Suggested:".
+- Return ONLY valid JSON, nothing else.`,
+        },
+        {
+          role: "user",
+          content: `Signal: ${sig?.type || "Unknown"} (score: ${sig?.score ?? "?"}, priority: ${sig?.priority ?? "?"})
+Material: ${doc.material}, Plant: ${doc.plant}, Sales Office: ${doc.sales_office}, Month: ${String(doc.date).slice(0, 10)}
+Detail: ${sig?.detail || ""}
+Reasoning: ${sig?.reasoning || ""}
+
+Current planning values:
+- Sales Free Stock: ${doc.sales_free_stock_in_tons}t
+- Sales Contracts: ${doc.sales_contracts_in_tons}t
+- Sales Scheduling Agreement: ${doc.sales_scheduling_agreement_in_tons}t
+
+Historic reference (free stock):
+- 12M historic sales: ${doc.historic_sales_12_free_stock_in_tons}t
+- 24M historic sales: ${doc.historic_sales_24_free_stock_in_tons}t
+- 12M historic inventory: ${doc.historic_inventory_12_free_stock_in_tons}t`,
+        },
+      ],
+      { temperature: 0.5 }
+    );
+
+    // Parse — try direct JSON, then try extracting the first {...} block
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) {
+        try { parsed = JSON.parse(m[0]); } catch { /* fall through */ }
+      }
+    }
+
+    if (!parsed || !Array.isArray(parsed.recommendations)) {
+      return res.json({ recommendations: [] });
+    }
+
+    const recommendations = parsed.recommendations
+      .filter((r) => r && typeof r.text === "string" && r.text.trim())
+      .map((r) => ({
+        text: String(r.text).trim().slice(0, 600),
+        changes: sanitizeChanges(r.changes),
+      }));
+
+    res.json({ recommendations });
+  } catch (e) {
+    console.error("AI recs error:", e.message);
+    res.json({ recommendations: [], error: "AI recommendations unavailable" });
+  }
+});
 
 // --- debug: inspect rules + signal counts in real time ------------------
 app.get("/api/debug", async (req, res) => {

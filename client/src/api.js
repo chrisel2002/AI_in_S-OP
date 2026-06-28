@@ -1,6 +1,7 @@
 const json = (r) => r.json();
 
 export const getDashboard = ({ page = 0, pageSize = 100, type = "" } = {}) => {
+  
   const params = new URLSearchParams({ page, pageSize });
   if (type && type !== "all") params.set("type", type);
   return fetch(`/api/dashboard?${params}`).then(json);
@@ -79,3 +80,17 @@ export const getAllSignals = (type = "") => {
   if (type && type !== "all") params.set("type", type);
   return fetch(`/api/signals?${params}`).then(json);
 };
+
+// Save edited planning values and get the recalculated signal back
+export const updateSignal = (id, changes) =>
+  fetch(`/api/dashboard/signals/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  }).then(json);
+
+// AI recommendations for one signal row (keyed by MongoDB _id)
+export const getAiRecommendations = (id) =>
+  fetch(`/api/dashboard/signals/${id}/ai-recommendations`, {
+    method: "POST",
+  }).then(json);

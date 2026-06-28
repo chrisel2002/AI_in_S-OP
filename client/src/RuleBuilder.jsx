@@ -164,14 +164,83 @@ function getSuggestions(value, cursorPos) {
   return { list, start };
 }
 
-const METRICS = {
-  "Forecast sales (free stock)": "sales_free_stock_in_tons",
-  "Forecast sales (contracts)": "sales_contracts_in_tons",
-  "Forecast sales (scheduling agreement)": "sales_scheduling_agreement_in_tons",
-  "Inventory 12mo (free stock)": "historic_inventory_12_free_stock_in_tons",
-  "Historic sales 12mo (free stock)": "historic_sales_12_free_stock_in_tons",
-  "Historic sales 24mo (free stock)": "historic_sales_24_free_stock_in_tons",
+// ── Metric configuration for the structured condition builder ────────────
+// "direct" metrics resolve straight to one MongoDB field.
+// "periods" metrics resolve through a 12/24-month dropdown.
+// To enable a new metric, add an entry here. The backend whitelist in
+// signals.js METRIC_COLUMNS is already complete.
+const METRIC_DEFS = [
+  { id: "sales_free_stock",                  label: "Sales Free Stock",                  direct: "sales_free_stock_in_tons" },
+  { id: "sales_contracts",                   label: "Sales Contracts",                   direct: "sales_contracts_in_tons" },
+  { id: "sales_scheduling_agreement",        label: "Sales Scheduling Agreement",        direct: "sales_scheduling_agreement_in_tons" },
+  {
+    id: "historic_sales_free_stock",
+    label: "Historic Sales Free Stock",
+    periods: { "12": "historic_sales_12_free_stock_in_tons", "24": "historic_sales_24_free_stock_in_tons" },
+  },
+  {
+    id: "historic_sales_contracts",
+    label: "Historic Sales Contracts",
+    periods: { "12": "historic_sales_12_contracts_in_tons", "24": "historic_sales_24_contracts_in_tons" },
+  },
+  {
+    id: "historic_sales_scheduling_agreement",
+    label: "Historic Sales Scheduling Agreement",
+    periods: { "12": "historic_sales_12_scheduling_agreement_in_tons", "24": "historic_sales_24_scheduling_agreement_in_tons" },
+  },
+  {
+    id: "historic_inventory_free_stock",
+    label: "Historic Inventory Free Stock",
+    periods: { "12": "historic_inventory_12_free_stock_in_tons", "24": "historic_inventory_24_free_stock_in_tons" },
+  },
+];
+
+// Flat list of all resolved fields — used for the baseline dropdown (percent_change).
+const BASELINE_OPTIONS = METRIC_DEFS.flatMap((d) =>
+  d.direct
+    ? [{ field: d.direct, label: d.label }]
+    : Object.entries(d.periods).map(([p, f]) => ({ field: f, label: `${d.label} (${p}M)` }))
+);
+
+// Legacy label → column key (for rules saved before this refactor)
+const LEGACY_LABEL_TO_FIELD = {
+  "Forecast sales (free stock)":               "sales_free_stock_in_tons",
+  "Forecast sales (contracts)":                "sales_contracts_in_tons",
+  "Forecast sales (scheduling agreement)":     "sales_scheduling_agreement_in_tons",
+  "Inventory 12mo (free stock)":               "historic_inventory_12_free_stock_in_tons",
+  "Historic sales 12mo (free stock)":          "historic_sales_12_free_stock_in_tons",
+  "Historic sales 24mo (free stock)":          "historic_sales_24_free_stock_in_tons",
 };
+
+// Resolve a stored value (column key or legacy label) to a column key.
+function resolveField(val) {
+  if (!val) return null;
+  return LEGACY_LABEL_TO_FIELD[val] ?? val;
+}
+
+// Given a MongoDB column key, return the METRIC_DEFS id + selected period.
+function fieldToMetricSelection(field) {
+  const resolved = resolveField(field) || field;
+  for (const def of METRIC_DEFS) {
+    if (def.direct === resolved) return { metricId: def.id, period: null };
+    if (def.periods) {
+      for (const [p, f] of Object.entries(def.periods)) {
+        if (f === resolved) return { metricId: def.id, period: p };
+      }
+    }
+  }
+  return { metricId: METRIC_DEFS[0].id, period: null };
+}
+
+// Given a metricId + period, return the MongoDB column key.
+function resolveMetricColumn(metricId, period) {
+  const def = METRIC_DEFS.find((d) => d.id === metricId);
+  if (!def) return "sales_free_stock_in_tons";
+  if (def.direct) return def.direct;
+  const p = period && def.periods[period] ? period : "12";
+  return def.periods[p];
+}
+
 const OPERATORS = {
   "is greater than": ">",
   "is greater or equal": ">=",
@@ -184,12 +253,8 @@ const SEVERITIES = ["low", "medium", "high"];
 const labelFor = (obj, val, fallback) =>
   Object.keys(obj).find((k) => obj[k] === val) || fallback;
 
-const resolveBaseline = (val) => {
-  if (!val) return null;
-  if (Object.values(METRICS).includes(val)) return val;
-  if (METRICS[val]) return METRICS[val];
-  return val;
-};
+// resolveBaseline is kept for save() — resolves legacy labels and passes through column keys.
+const resolveBaseline = resolveField;
 
 const EMPTY_COND = () => ({
   metric: "sales_free_stock_in_tons",
@@ -214,11 +279,11 @@ const EMPTY_DRAFT = () => ({
 function normalizeCond(c) {
   return {
     ...EMPTY_COND(),
-    metric: c.metric || "sales_free_stock_in_tons",
+    metric: resolveField(c.metric) || "sales_free_stock_in_tons",
     comparison_type: c.comparison_type || "absolute",
     operator: c.operator || ">",
     threshold: c.threshold ?? 0,
-    baseline: resolveBaseline(c.baseline),
+    baseline: resolveField(c.baseline),
   };
 }
 
@@ -249,17 +314,50 @@ const SEV_STYLE = {
 
 function ConditionRow({ cond, total, onUpdate, onRemove }) {
   const isPercent = cond.comparison_type === "percent_change";
+  const { metricId, period } = fieldToMetricSelection(cond.metric);
+  const def = METRIC_DEFS.find((d) => d.id === metricId) || METRIC_DEFS[0];
+  const hasPeriod = !!def.periods;
+
+  function handleMetricChange(newId) {
+    const newDef = METRIC_DEFS.find((d) => d.id === newId) || METRIC_DEFS[0];
+    if (newDef.direct) {
+      onUpdate({ metric: newDef.direct });
+    } else {
+      // Preserve current period when the new metric also has it; otherwise default to 12M
+      const newPeriod = period && newDef.periods[period] ? period : "12";
+      onUpdate({ metric: newDef.periods[newPeriod] });
+    }
+  }
+
+  function handlePeriodChange(newPeriod) {
+    if (def.periods) onUpdate({ metric: def.periods[newPeriod] });
+  }
+
   return (
     <div className="rb-cond">
       <div className="rb-cond-body">
-        <select
-          className="rb-select rb-select-full"
-          value={labelFor(METRICS, cond.metric, Object.keys(METRICS)[0])}
-          onChange={(e) => onUpdate({ metric: METRICS[e.target.value] })}
-        >
-          {Object.keys(METRICS).map((k) => <option key={k}>{k}</option>)}
-        </select>
+        {/* Metric selector + optional period dropdown */}
+        <div className="rb-cond-inline">
+          <select
+            className="rb-select rb-select-grow"
+            value={metricId}
+            onChange={(e) => handleMetricChange(e.target.value)}
+          >
+            {METRIC_DEFS.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+          </select>
+          {hasPeriod && (
+            <select
+              className="rb-select rb-select-period"
+              value={period || "12"}
+              onChange={(e) => handlePeriodChange(e.target.value)}
+            >
+              <option value="12">12 months</option>
+              <option value="24">24 months</option>
+            </select>
+          )}
+        </div>
 
+        {/* Operator / threshold / unit */}
         <div className="rb-cond-inline">
           <select
             className="rb-select rb-select-grow"
@@ -285,16 +383,19 @@ function ConditionRow({ cond, total, onUpdate, onRemove }) {
           </select>
         </div>
 
+        {/* Baseline selector for percent_change — flat list of all resolved fields */}
         {isPercent && (
           <div className="rb-cond-inline">
             <span className="rb-cond-against">compared against</span>
             <select
               className="rb-select rb-select-grow"
-              value={labelFor(METRICS, cond.baseline, "")}
-              onChange={(e) => onUpdate({ baseline: METRICS[e.target.value] })}
+              value={cond.baseline || ""}
+              onChange={(e) => onUpdate({ baseline: e.target.value || null })}
             >
               <option value="">— select baseline —</option>
-              {Object.keys(METRICS).map((k) => <option key={k}>{k}</option>)}
+              {BASELINE_OPTIONS.map((o) => (
+                <option key={o.field} value={o.field}>{o.label}</option>
+              ))}
             </select>
           </div>
         )}

@@ -61,9 +61,9 @@ export function loadData() {
 // Assumes mongoose is already connected (see store.initStore).
 export async function loadDataFromMongo() {
   const coll = mongoose.connection.db.collection(PLAN_COLLECTION);
-  const docs = await coll.find({}, { projection: { _id: 0 } }).toArray();
+  const docs = await coll.find({}).toArray();
   ROWS = docs.map((d) => {
-    const row = { ...d, date: normalizeDate(d.date) };
+    const row = { ...d, _id: String(d._id), date: normalizeDate(d.date) };
     for (const col of NUMERIC) row[col] = Number(row[col]) || 0;
     return row;
   });
@@ -73,4 +73,11 @@ export async function loadDataFromMongo() {
 
 export function getRows() {
   return ROWS;
+}
+
+// Patch one in-memory row after a MongoDB update, so the signal cache stays
+// consistent without a full reload. Only updates the fields that were changed.
+export function updateRowById(id, fields) {
+  const idx = ROWS.findIndex((r) => r._id === String(id));
+  if (idx !== -1) ROWS[idx] = { ...ROWS[idx], ...fields };
 }

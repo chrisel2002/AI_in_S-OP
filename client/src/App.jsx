@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, suggestActions, getSignalStatuses, setSignalStatus, clearSignalStatus } from "./api.js";
+import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, getSignalStatuses, setSignalStatus, clearSignalStatus, updateSignal, getAiRecommendations } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -139,8 +139,10 @@ export default function App() {
 
   async function refresh({ fetchRules = false } = {}) {
     const fetches = [getDashboard()];
+    console.log('fetches', fetches);
     if (fetchRules) fetches.push(getRules());
     const [d, r] = await Promise.all(fetches);
+    console.log('dashboard', d);
     setDash(d);
     if (d.allSignals) setAllSignals(d.allSignals);
     if (r) setRules(r);
@@ -186,6 +188,15 @@ export default function App() {
   async function handleClearStatus(key) {
     await clearSignalStatus(key);
     setStatuses((prev) => { const n = { ...prev }; delete n[key]; return n; });
+  }
+
+  function handleSignalUpdate(mongoId, updatedSignal) {
+    if (updatedSignal) {
+      setAllSignals((prev) => prev.map((s) => s._id === mongoId ? updatedSignal : s));
+    } else {
+      // Signal disappeared or changed type after recalculation — reload
+      refresh();
+    }
   }
 
   async function handleExportCSV() {
@@ -448,6 +459,7 @@ export default function App() {
                     signalStatus={statuses[s.key]?.status || null}
                     onSetStatus={(st) => handleSetStatus(s.key, st)}
                     onClearStatus={() => handleClearStatus(s.key)}
+                    onSignalUpdate={handleSignalUpdate}
                   />
                 ))}
               </tbody>
@@ -475,6 +487,162 @@ export default function App() {
 
       <Chat />
     </div>
+  );
+}
+
+// ---- editable field configuration (frontend source of truth) -----------
+// To expose additional fields in the future, add an entry here and on the
+// server-side ALLOWED_EDITABLE_FIELDS set in index.js.
+const EDITABLE_FIELDS = [
+  { key: "sales_free_stock_in_tons",              label: "Sales Free Stock",            group: "Sales Forecast", editable: true, visible: true, unit: "t" },
+  { key: "sales_contracts_in_tons",              label: "Sales Contracts",              group: "Sales Forecast", editable: true, visible: true, unit: "t" },
+  { key: "sales_scheduling_agreement_in_tons",   label: "Sales Scheduling Agreement",  group: "Sales Forecast", editable: true, visible: true, unit: "t" },
+];
+
+// ---- PlanningInputs component ------------------------------------------
+function PlanningInputs({ signal, localEdits, setLocalEdits, onSave, saving, saveStatus }) {
+  const fields = EDITABLE_FIELDS.filter((f) => f.editable && f.visible);
+
+  function handleChange(key, rawValue) {
+    setLocalEdits((prev) => ({ ...prev, [key]: rawValue }));
+  }
+
+  function handleBlur(key, rawValue) {
+    // Blank input on blur → restore saved value (remove from edits)
+    if (rawValue === "" || rawValue === null || rawValue === undefined) {
+      setLocalEdits((prev) => { const n = { ...prev }; delete n[key]; return n; });
+    }
+  }
+
+  const hasRealChanges = fields.some((f) => {
+    if (!(f.key in localEdits)) return false;
+    const num = parseFloat(localEdits[f.key]);
+    return Number.isFinite(num) && num !== (signal[f.key] ?? 0);
+  });
+
+  function handleSave() {
+    const changed = {};
+    for (const f of fields) {
+      if (!(f.key in localEdits)) continue;
+      const num = parseFloat(localEdits[f.key]);
+      if (!Number.isFinite(num)) {
+        alert(`"${f.label}" must be a valid number.`);
+        return;
+      }
+      if (num !== (signal[f.key] ?? 0)) changed[f.key] = num;
+    }
+    if (Object.keys(changed).length === 0) return;
+    onSave(changed);
+  }
+
+  function handleReset() {
+    setLocalEdits({});
+  }
+
+  return (
+    <div className="plan-inputs-section">
+      <div className="sig-detail-section-title">Planning Inputs</div>
+      <div className="plan-inputs-row">
+        {fields.map((f) => {
+          const savedVal = signal[f.key] ?? 0;
+          const isDirty = f.key in localEdits && parseFloat(localEdits[f.key]) !== savedVal;
+          const displayVal = f.key in localEdits ? localEdits[f.key] : savedVal;
+          return (
+            <div key={f.key} className={`plan-input-group${isDirty ? " plan-input-dirty" : ""}`}>
+              <label className="plan-input-label">{f.label}</label>
+              <div className="plan-input-wrap">
+                <input
+                  type="number"
+                  step="any"
+                  className="plan-input-field"
+                  value={displayVal}
+                  onChange={(e) => handleChange(f.key, e.target.value)}
+                  onBlur={(e) => handleBlur(f.key, e.target.value)}
+                  disabled={saving}
+                />
+                {f.unit && <span className="plan-input-unit">{f.unit}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="plan-inputs-actions">
+        <button className="btn" onClick={handleReset} disabled={saving || !hasRealChanges}>
+          Reset
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={handleSave}
+          disabled={saving || !hasRealChanges}
+        >
+          {saving ? "Saving…" : "Save & Recalculate"}
+        </button>
+        {saveStatus === "success" && (
+          <span className="plan-save-ok">✓ Saved</span>
+        )}
+        {saveStatus && saveStatus !== "success" && (
+          <span className="plan-save-err">{saveStatus}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- AiRecommendationsPanel component ----------------------------------
+function AiRecommendationsPanel({ rowId, onApply }) {
+  const [recs, setRecs] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!rowId) { setLoading(false); return; }
+    setLoading(true);
+    setFailed(false);
+    getAiRecommendations(rowId)
+      .then((r) => setRecs(r?.recommendations || []))
+      .catch(() => { setFailed(true); setRecs([]); })
+      .finally(() => setLoading(false));
+  }, [rowId]);
+
+  if (loading) {
+    return (
+      <div className="action-skeleton">
+        {[75, 90, 60].map((w, i) => (
+          <div key={i} className="action-skeleton-item">
+            <div className="skeleton-circle" />
+            <div className="skeleton-lines">
+              <div className="skeleton-line" style={{ width: `${w}%` }} />
+              {w > 70 && <div className="skeleton-line" style={{ width: `${w - 30}%` }} />}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (failed || !recs || recs.length === 0) {
+    return <p className="snap-fallback">{failed ? "Could not load AI recommendations." : "No recommendations available."}</p>;
+  }
+
+  return (
+    <ol className="action-list ai-recs-list">
+      {recs.map((rec, i) => (
+        <li key={i} className="action-list-item">
+          <span className="action-num">{i + 1}</span>
+          <span className="action-text">
+            {rec.text}
+            {rec.changes && (
+              <button
+                className="ai-apply-btn"
+                onClick={() => onApply(rec.changes)}
+              >
+                Apply
+              </button>
+            )}
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -711,52 +879,22 @@ function SnapshotView({ snap, s }) {
   return <p className="snap-fallback">{s.reasoning}</p>;
 }
 
-function ActionList({ text, loading }) {
-  if (loading) return (
-    <div className="action-skeleton">
-      {[70, 90, 55].map((w, i) => (
-        <div key={i} className="action-skeleton-item">
-          <div className="skeleton-circle" />
-          <div className="skeleton-lines">
-            <div className="skeleton-line" style={{ width: `${w}%` }} />
-            {w > 70 && <div className="skeleton-line" style={{ width: `${w - 25}%` }} />}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-  if (!text) return null;
-  // Parse "1. Foo\n2. Bar" into individual items; fall back to plain text
-  const items = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
-  const numbered = items.every((l) => /^\d+\./.test(l));
-  if (!numbered) return <p className="sig-actions-text">{text}</p>;
-  return (
-    <ol className="action-list">
-      {items.map((item, i) => (
-        <li key={i} className="action-list-item">
-          <span className="action-num">{i + 1}</span>
-          <span className="action-text">{item.replace(/^\d+\.\s*/, "")}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
 
-function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, onClearStatus }) {
-  const [aiActions, setAiActions] = useState(null);
-  const [aiLoading, setAiLoading] = useState(false);
+function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, onClearStatus, onSignalUpdate }) {
   const [showOrders, setShowOrders] = useState(false);
   const [orders, setOrders] = useState(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [localEdits, setLocalEdits] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null); // null | 'success' | error string
 
   useEffect(() => {
-    if (expanded && aiActions === null && !aiLoading) {
-      setAiLoading(true);
-      suggestActions(s)
-        .then((r) => setAiActions(r?.actions || ""))
-        .finally(() => setAiLoading(false));
+    if (!expanded) {
+      setShowOrders(false);
+      setOrders(null);
+      setLocalEdits({});
+      setSaveStatus(null);
     }
-    if (!expanded) { setShowOrders(false); setOrders(null); }
   }, [expanded]);
 
   function toggleOrders() {
@@ -767,6 +905,35 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
         .finally(() => setOrdersLoading(false));
     }
     setShowOrders((v) => !v);
+  }
+
+  async function handleSave(changed) {
+    if (!s._id) return;
+    setSaving(true);
+    setSaveStatus(null);
+    try {
+      const result = await updateSignal(s._id, changed);
+      setLocalEdits({});
+      setSaveStatus("success");
+      setTimeout(() => setSaveStatus(null), 3000);
+      if (onSignalUpdate) onSignalUpdate(s._id, result.signal);
+    } catch (e) {
+      setSaveStatus(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleApplyRec(changes) {
+    setLocalEdits((prev) => {
+      const n = { ...prev };
+      for (const [key, value] of Object.entries(changes || {})) {
+        if (EDITABLE_FIELDS.some((f) => f.key === key && f.editable)) {
+          n[key] = String(value);
+        }
+      }
+      return n;
+    });
   }
 
   const pillClass = typePill[s.type] || "pill-blue";
@@ -809,10 +976,20 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
                 <SnapshotView snap={s.snapshot} s={s} />
               </div>
               <div className="sig-detail-actions">
-                <div className="sig-detail-section-title">Recommended actions</div>
-                <ActionList text={aiActions} loading={aiLoading} />
+                <div className="sig-detail-section-title">AI Recommendations</div>
+                <AiRecommendationsPanel rowId={s._id} onApply={handleApplyRec} />
               </div>
             </div>
+            {s._id && (
+              <PlanningInputs
+                signal={s}
+                localEdits={localEdits}
+                setLocalEdits={setLocalEdits}
+                onSave={handleSave}
+                saving={saving}
+                saveStatus={saveStatus}
+              />
+            )}
             <div className="sig-status-bar">
               <span className="sig-status-label">Mark as:</span>
               {[

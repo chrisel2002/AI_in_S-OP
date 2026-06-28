@@ -13,12 +13,17 @@ function comboKey(r) {
 }
 
 const METRICS = {
-  "sales_free_stock_in_tons": "Forecast sales (free stock)",
-  "sales_contracts_in_tons": "Forecast sales (contracts)",
-  "sales_scheduling_agreement_in_tons": "Forecast sales (scheduling agreement)",
-  "historic_inventory_12_free_stock_in_tons": "Inventory 12mo (free stock)",
-  "historic_sales_12_free_stock_in_tons": "Historic sales 12mo (free stock)",
-  "historic_sales_24_free_stock_in_tons": "Historic sales 24mo (free stock)",
+  "sales_free_stock_in_tons":                           "Forecast sales (free stock)",
+  "sales_contracts_in_tons":                            "Forecast sales (contracts)",
+  "sales_scheduling_agreement_in_tons":                 "Forecast sales (scheduling agreement)",
+  "historic_inventory_12_free_stock_in_tons":           "Inventory 12mo (free stock)",
+  "historic_inventory_24_free_stock_in_tons":           "Inventory 24mo (free stock)",
+  "historic_sales_12_free_stock_in_tons":               "Historic sales 12mo (free stock)",
+  "historic_sales_12_contracts_in_tons":                "Historic contracts 12mo",
+  "historic_sales_12_scheduling_agreement_in_tons":     "Historic sched. agr. 12mo",
+  "historic_sales_24_free_stock_in_tons":               "Historic sales 24mo (free stock)",
+  "historic_sales_24_contracts_in_tons":                "Historic contracts 24mo",
+  "historic_sales_24_scheduling_agreement_in_tons":     "Historic sched. agr. 24mo",
 };
 
 // Reverse map: label → column key (to handle rules saved with old label-based baseline)
@@ -44,9 +49,11 @@ function groupByCombo(rows) {
 }
 
 function baseSignal(r, extra) {
+  // Spread the full source row first (includes _id, all planning/historic fields,
+  // date, etc.) so the frontend has every MongoDB field available. Then add the
+  // salesOffice alias and the computed signal fields which come in via `extra`.
   return {
-    material: r.material,
-    plant: r.plant,
+    ...r,
     salesOffice: r.sales_office,
     ...extra,
   };

@@ -350,7 +350,8 @@ tr:hover td { background: var(--surface-2); }
 .rb-select:focus { outline: none; border-color: var(--blue); }
 .rb-select-full { width: 100%; }
 .rb-select-grow { flex: 1; min-width: 0; }
-.rb-select-unit { min-width: 88px; }
+.rb-select-unit   { min-width: 88px; }
+.rb-select-period { min-width: 108px; flex-shrink: 0; }
 .rb-input-num { width: 68px; font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); text-align: right; flex-shrink: 0; }
 .rb-input-num:focus { outline: none; border-color: var(--blue); }
 .rb-remove { background: none; border: none; color: #ccc; cursor: pointer; font-size: 20px; line-height: 1; padding: 0; flex-shrink: 0; }
@@ -478,6 +479,57 @@ tr:hover td { background: var(--surface-2); }
 .chat-assistant { align-self: flex-start; background: var(--surface-2); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
 .chat-input { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
 .chat-input input { flex: 1; font-size: 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+
+/* ===== Planning inputs (expanded row) ===== */
+.plan-inputs-section {
+  padding: 16px 24px; background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.plan-inputs-row {
+  display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0 14px;
+}
+.plan-input-group {
+  display: flex; flex-direction: column; gap: 5px;
+  min-width: 160px;
+}
+.plan-input-label {
+  font-size: 10px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.plan-input-wrap {
+  display: flex; align-items: center; gap: 4px;
+}
+.plan-input-field {
+  width: 110px; font-size: 13px; padding: 6px 8px;
+  border: 1.5px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text);
+  text-align: right;
+}
+.plan-input-field:focus { outline: none; border-color: var(--tk-blue); }
+.plan-input-unit { font-size: 11px; color: var(--text-2); }
+
+/* Dirty (changed but not saved) highlight */
+.plan-input-dirty .plan-input-field {
+  border-color: #f59e0b; background: #fffbeb;
+}
+.plan-input-dirty .plan-input-label { color: #92400e; }
+
+.plan-inputs-actions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.plan-save-ok  { font-size: 12px; font-weight: 600; color: #166534; }
+.plan-save-err { font-size: 12px; font-weight: 600; color: #b91c1c; }
+
+/* ===== AI recommendations (replaces old "Recommended actions" column) ===== */
+.ai-recs-list { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.ai-apply-btn {
+  display: inline-block; margin-left: 10px;
+  font-size: 11px; font-weight: 700; padding: 3px 10px;
+  border-radius: 20px; border: 1.5px solid var(--tk-blue);
+  background: var(--blue-bg); color: var(--tk-blue); cursor: pointer;
+  vertical-align: middle; white-space: nowrap;
+}
+.ai-apply-btn:hover { background: var(--tk-blue); color: #fff; }
 
 /* ===== Custom rules list ===== */
 .rules-list { display: flex; flex-direction: column; gap: 6px; }
