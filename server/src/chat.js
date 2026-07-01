@@ -33,7 +33,7 @@ export function buildChatContext(rows, signals, rules) {
   const lines = [
     `Dataset: ${rows.length} monthly plan rows; ${materials.size} materials, ${plants.size} plants, ${offices.size} sales offices; horizon 2026-06 to 2027-05.`,
     `Total planned free-stock forecast across the horizon: ${totalForecast.toFixed(1)} tons.`,
-    `Signals this cycle: ${signals.length} total (${signals.filter((s) => s.score > 80).length} high severity).`,
+    `Signals this cycle: ${signals.length} total (${signals.filter((s) => s.score >= 8).length} high severity).`,
     `Active custom rules: ${rules.filter((r) => r.active !== false).map((r) => r.name).join("; ") || "none"}.`,
     `Top materials by total forecast (tons): ${topN(byMaterial, 8).map(([m, v]) => `${m}=${v.toFixed(1)}`).join(", ")}.`,
     `Top plants by total forecast (tons): ${topN(byPlant, 6).map(([p, v]) => `${p}=${v.toFixed(1)}`).join(", ")}.`,

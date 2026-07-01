@@ -1,12 +1,14 @@
 import vm from "node:vm";
 
-const PRIORITY = (score) => (score >= 85 ? "High" : score >= 60 ? "Medium" : "Low");
+// Scores are on a 0-10 scale throughout the app: >=8 High, >=5 Medium, else Low.
+const PRIORITY = (score) => (score >= 8 ? "High" : score >= 5 ? "Medium" : "Low");
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const round1 = (n) => Math.round(n * 10) / 10;
 
 const MIN_TONS = 5;
 
 const ratioScore = (ratio) =>
-  clamp(Math.round(40 + 20 * Math.log2(1 + Math.abs(ratio))), 40, 100);
+  clamp(round1(4 + 2 * Math.log2(1 + Math.abs(ratio))), 4, 10);
 
 function comboKey(r) {
   return `${r.material}|${r.plant}|${r.sales_office}`;
@@ -138,7 +140,7 @@ function detectLowInventory(months) {
   if (!worst) return null;
   const { r, inv, demand } = worst;
   const coverage = inv / demand;
-  const score = inv <= 0 ? 85 : clamp(Math.round(80 - coverage * 40), 50, 85);
+  const score = inv <= 0 ? 8.5 : clamp(round1(8 - coverage * 4), 5, 8.5);
   return baseSignal(r, {
     type: "Stockout risk",
     month: r.date,
@@ -157,7 +159,7 @@ function detectNewDemand(months) {
     const hist = r.historic_sales_12_free_stock_in_tons + r.historic_sales_24_free_stock_in_tons;
     const plan = r.sales_free_stock_in_tons;
     if (plan >= MIN_TONS && hist === 0) {
-      const score = 58;
+      const score = 5.8;
       return baseSignal(r, {
         type: "New demand",
         month: r.date,
@@ -294,11 +296,13 @@ function buildStructuredConditions(row, groups, groupLogic) {
 
 // Returns ALL matching rows as individual signals (not just the single worst)
 function detectCustomRule(months, rule) {
-  // Accept both the current low/medium/high labels and the legacy info/warning/
-  // critical values that may still be stored on older rules.
-  const score = ["high", "critical"].includes(rule.severity) ? 90
-    : ["medium", "warning"].includes(rule.severity) ? 65
-    : 50;
+  // Rules built with the score-based group builder carry an explicit 0-10
+  // score; older rules only have a severity label, which we map to a score.
+  // Also accepts the legacy info/warning/critical values from older rules.
+  const score = typeof rule.score === "number" ? rule.score
+    : ["high", "critical"].includes(rule.severity) ? 9
+    : ["medium", "warning"].includes(rule.severity) ? 6.5
+    : 5;
   const results = [];
 
   // ── Formula path (AI-generated arbitrary expression) ────────────────────
@@ -402,16 +406,16 @@ export function buildDashboard(signals, rulesActive, { page = 0, pageSize = 100,
   // byType always uses the FULL signal set so dropdown is never missing types
   const sourceForStats = allSignals || signals;
   const byType = {};
-  const byBucket = { "0–30": 0, "31–50": 0, "51–70": 0, "71–90": 0, "90+": 0 };
+  const byBucket = { "0–3": 0, "3–5": 0, "5–7": 0, "7–9": 0, "9–10": 0 };
 
   for (const s of sourceForStats) {
     byType[s.type] = (byType[s.type] || 0) + 1;
     const sc = s.score;
-    if (sc <= 30) byBucket["0–30"]++;
-    else if (sc <= 50) byBucket["31–50"]++;
-    else if (sc <= 70) byBucket["51–70"]++;
-    else if (sc <= 90) byBucket["71–90"]++;
-    else byBucket["90+"]++;
+    if (sc <= 3) byBucket["0–3"]++;
+    else if (sc <= 5) byBucket["3–5"]++;
+    else if (sc <= 7) byBucket["5–7"]++;
+    else if (sc <= 9) byBucket["7–9"]++;
+    else byBucket["9–10"]++;
   }
 
   const totalSignals = signals.length;
@@ -422,8 +426,8 @@ export function buildDashboard(signals, rulesActive, { page = 0, pageSize = 100,
   return {
     kpis: {
       total: sourceForStats.length,   // total across ALL signals including custom
-      critical: sourceForStats.filter((s) => s.score >= 85).length,
-      medium: sourceForStats.filter((s) => s.score >= 60 && s.score < 85).length,
+      critical: sourceForStats.filter((s) => s.score >= 8).length,
+      medium: sourceForStats.filter((s) => s.score >= 5 && s.score < 8).length,
       rulesActive,
     },
     byType,

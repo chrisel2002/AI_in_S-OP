@@ -19,6 +19,8 @@ const conditionSchema = new mongoose.Schema(
 const groupSchema = new mongoose.Schema(
   {
     logic: { type: String, enum: ["AND", "OR"], default: "AND" }, // ALL or ANY within the group
+    score: { type: Number, default: 6 }, // 0-10, drives the derived severity below
+    severity: { type: String, enum: ["low", "medium", "high"], default: "medium" },
     conditions: [conditionSchema],
   },
   { _id: false }
@@ -43,6 +45,7 @@ const ruleSchema = new mongoose.Schema(
     threshold: Number,
     group_by: [String],
     severity: String,
+    score: Number,
     raw_sentence: String,
     active: { type: Boolean, default: true },
   },
