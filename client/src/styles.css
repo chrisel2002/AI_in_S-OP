@@ -314,6 +314,10 @@ tr:hover td { background: var(--surface-2); }
 .rb-textarea { width: 100%; resize: vertical; font-size: 13px; font-family: inherit; line-height: 1.5; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
 .rb-textarea:focus { outline: none; border-color: var(--blue); }
 .rb-ai-note { display: flex; align-items: center; justify-content: space-between; background: var(--blue-bg); border: 1px solid var(--blue-border); border-radius: 8px; padding: 9px 13px; font-size: 12px; color: var(--blue); gap: 8px; }
+/* Original user description — pinned above the generated rule so it stays visible. */
+.rb-original { display: flex; flex-direction: column; gap: 5px; background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--blue); border-radius: 8px; padding: 9px 13px; }
+.rb-original-label { font-size: 11px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.rb-original-text { margin: 0; font-size: 13px; color: var(--text); line-height: 1.5; font-style: italic; white-space: pre-wrap; }
 .rb-prompt-hint { display: flex; align-items: flex-start; gap: 8px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 10px 13px; font-size: 13px; color: #92400e; line-height: 1.5; }
 .rb-prompt-hint-icon { flex-shrink: 0; font-size: 15px; }
 /* Fields */
@@ -351,6 +355,10 @@ tr:hover td { background: var(--surface-2); }
 .rb-group-sev-bar-track { width: 20px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .rb-group-sev-bar-fill { display: block; height: 100%; border-radius: 2px; transition: width .15s; }
 .rb-group-sev-value { font-size: 11px; font-weight: 700; min-width: 32px; }
+/* Standalone criticality slider for formula rules — mirrors the group-header bar
+   (surface-2 strip, label left / compact slider right) so it matches the manual
+   builder's slider exactly. Reuses the same compact .rb-group-sev sizing. */
+.rb-formula-sev { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 13px; background: var(--surface-2); border: 1.5px solid var(--border); border-radius: 10px; }
 /* Condition row */
 .rb-cond { display: flex; align-items: flex-start; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; }
 .rb-cond-body { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
