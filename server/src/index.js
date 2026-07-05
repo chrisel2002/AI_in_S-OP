@@ -10,6 +10,7 @@ import { parseSentence, checkPromptClarity } from "./parser.js";
 import { getAllStatuses, upsertStatus, removeStatus } from "./status.js";
 import { suggestActions } from "./suggest.js";
 import { buildChatContext, answerQuestion } from "./chat.js";
+import { buildSalesAnalysisContext } from "./salesAnalysis.js";
 import { chatLLM, llmEnabled } from "./llm.js";
 import {
   initStore,
@@ -169,7 +170,18 @@ app.post("/api/chat", async (req, res) => {
   if (!question) return res.status(400).json({ error: "question required" });
   const [signals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
   const context = buildChatContext(getRows(), signals, rules);
-  res.json({ answer: await answerQuestion(question, context, history || []) });
+
+  let salesAnalysis = null;
+  try {
+    salesAnalysis = await buildSalesAnalysisContext(question, { rows: getRows(), signals });
+  } catch (e) {
+    console.log("sales analysis failed:", e.message);
+  }
+
+  res.json({
+    answer: await answerQuestion(question, context, history || [], salesAnalysis),
+    usedSalesAnalysis: Boolean(salesAnalysis),
+  });
 });
 
 // --- AI suggested actions for one signal, grounded in its underlying orders ---

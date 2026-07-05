@@ -44,8 +44,14 @@ export function buildChatContext(rows, signals, rules) {
   return lines.join("\n");
 }
 
-export async function answerQuestion(question, context, history = []) {
+export async function answerQuestion(question, context, history = [], salesAnalysis = null) {
   if (!llmEnabled()) return "The AI assistant is currently disabled (no API key configured).";
+
+  const salesInstructions = salesAnalysis
+    ? " A SALES ANALYSIS section is also provided below, computed by the backend from underlying order-level records (underlying_sales). Only use the customers, countries, quantities and shares that literally appear in it — never invent or extrapolate beyond those numbers. When you use it, explicitly tell the planner that this analysis matched by material, sales office, period, and sales type, and that plant was not used (plant mapping differs between the planning and order-level collections). If the section doesn't cover what the user asked, say the current view doesn't have enough data for it."
+    : "";
+  const salesBlock = salesAnalysis ? `\n\nSALES ANALYSIS (backend-calculated, from underlying_sales):\n${salesAnalysis}` : "";
+
   const messages = [
     {
       role: "system",
@@ -53,14 +59,21 @@ export async function answerQuestion(question, context, history = []) {
         "You are an analyst assistant for a Sales & Operations Planning (S&OP) dashboard. " +
         "Every answer MUST be specific to the DATA CONTEXT below — cite the actual signal types, material numbers, plant numbers, months and figures from it. Do NOT invent materials, plants, or numbers that aren't present, and do NOT give generic textbook advice that isn't tied to a specific signal in the context. " +
         "When asked what to do or for suggestions, recommend concrete S&OP actions, but anchor each one to a specific signal or material/plant from the context (e.g. 'validate the +2357% surge on material 11681 at plant 28 with sales'). Match the recommendation to the signal TYPE: stockout-risk questions must use the Stockout risk signals listed, demand questions the Demand surge/drop signals, etc. — do not mix types. " +
-        "If a detail the user asks about isn't in the context, say you don't have it in the current view. Keep answers focused.\n\nDATA CONTEXT:\n" +
-        context,
+        "If a detail the user asks about isn't in the context, say you don't have it in the current view. Keep answers focused." +
+        salesInstructions +
+        "\n\nDATA CONTEXT:\n" + context + salesBlock,
     },
     ...history.slice(-6),
     { role: "user", content: question },
   ];
   try {
-    return (await chatLLM(messages, { temperature: 0.3 })) || "I couldn't generate an answer.";
+    const answer = (await chatLLM(messages, { temperature: 0.3 })) || "I couldn't generate an answer.";
+    // Don't rely on the model to remember the matching disclosure every time —
+    // append it deterministically whenever the sales analysis was actually used.
+    if (salesAnalysis && !/sales office/i.test(answer)) {
+      return `${answer}\n\n(This analysis matched underlying sales records by material, sales office, period, and sales type — plant was not used, since plant mapping differs between the planning and order-level collections.)`;
+    }
+    return answer;
   } catch (e) {
     console.log("chat LLM failed:", e.message);
     return "Sorry, the assistant is unavailable right now.";
