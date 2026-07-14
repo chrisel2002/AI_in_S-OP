@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-This contains the codebase for the project AI in Supply and operations planning with the integration of LLM
-=======
 # AI in S&OP — Signal Dashboard
 
 A collaboration with **ThyssenKrupp** that turns raw Sales & Operations Planning (S&OP)
@@ -261,4 +258,3 @@ Open **http://localhost:5173** — the Vite dev server proxies `/api/*` to the b
 - All score-based thresholds (priority pills, KPI counts, chart buckets, rule
   severity) are intentionally kept on the same 0–10 scale and the same `≥8 / ≥5`
   boundaries — if you add a new place that classifies a score, match this convention.
->>>>>>> feature/mern-signal-dashboard
