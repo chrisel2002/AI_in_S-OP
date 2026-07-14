@@ -7,8 +7,8 @@ export function generateBriefing(signals) {
   if (!signals.length) {
     return "No signals detected this cycle.\nAll demand plans are within tolerance versus the 12-month actuals.";
   }
-  const high = signals.filter((s) => s.score > 80).length;
-  const medium = signals.filter((s) => s.score >= 50 && s.score <= 80).length;
+  const high = signals.filter((s) => s.score >= 8).length;
+  const medium = signals.filter((s) => s.score >= 5 && s.score < 8).length;
   const top = signals.slice(0, 3);
   const topLines = top
     .map((s) => `  • ${s.type} — Material ${s.material}, Plant ${s.plant}\n    ${s.detail}`)
@@ -22,8 +22,8 @@ export function generateBriefing(signals) {
 
 export async function generateBriefingLLM(signals) {
   if (!llmEnabled() || !signals.length) return generateBriefing(signals);
-  const high = signals.filter((s) => s.score > 80).length;
-  const medium = signals.filter((s) => s.score >= 50 && s.score <= 80).length;
+  const high = signals.filter((s) => s.score >= 8).length;
+  const medium = signals.filter((s) => s.score >= 5 && s.score < 8).length;
   const top = signals
     .slice(0, 8)
     .map((s) => `- ${s.type}: material ${s.material}, plant ${s.plant}, ${s.month}, score ${s.score} (${s.detail})`)

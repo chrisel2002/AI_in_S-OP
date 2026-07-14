@@ -33,7 +33,7 @@ export function buildChatContext(rows, signals, rules) {
   const lines = [
     `Dataset: ${rows.length} monthly plan rows; ${materials.size} materials, ${plants.size} plants, ${offices.size} sales offices; horizon 2026-06 to 2027-05.`,
     `Total planned free-stock forecast across the horizon: ${totalForecast.toFixed(1)} tons.`,
-    `Signals this cycle: ${signals.length} total (${signals.filter((s) => s.score > 80).length} high severity).`,
+    `Signals this cycle: ${signals.length} total (${signals.filter((s) => s.score >= 8).length} high severity).`,
     `Active custom rules: ${rules.filter((r) => r.active !== false).map((r) => r.name).join("; ") || "none"}.`,
     `Top materials by total forecast (tons): ${topN(byMaterial, 8).map(([m, v]) => `${m}=${v.toFixed(1)}`).join(", ")}.`,
     `Top plants by total forecast (tons): ${topN(byPlant, 6).map(([p, v]) => `${p}=${v.toFixed(1)}`).join(", ")}.`,
@@ -44,8 +44,17 @@ export function buildChatContext(rows, signals, rules) {
   return lines.join("\n");
 }
 
-export async function answerQuestion(question, context, history = []) {
+export async function answerQuestion(question, context, history = [], salesAnalysis = null) {
   if (!llmEnabled()) return "The AI assistant is currently disabled (no API key configured).";
+
+  const salesInstructions = salesAnalysis
+    ? " A SALES ANALYSIS section is also provided below, computed by the backend (from underlying order-level records and/or sales_operations_tool planning fields). Only use the customers, countries, quantities, shares, materials and sales offices that literally appear in it — never invent or extrapolate beyond those numbers, and never combine two findings from that section unless they show the exact same material AND sales office. " +
+      "The section already tells you, per line, whether evidence is CONFIRMED (same material + sales office), a 'material-level indication only' (office does not match — do not upgrade this into a confirmed combined finding), 'low-volume' (technically correct but small absolute tons — do not describe it as a major risk or major loss), or 'cannot confirm' (do not claim causality). Repeat that qualifier faithfully in your answer instead of smoothing it into a stronger claim — but ONLY use a qualifier if that section's text literally contains it; do not invent your own caveats (e.g. don't call something 'material-level indication only' unless the text says so). If and only if you use a CUSTOMER CONCENTRATION section, briefly explain what customer concentration means in plain language; don't add that explanation to answers that don't use it. " +
+      "When you use this section, state plainly that the analysis matched by material, sales office, period, and sales type (plant was not used, since plant mapping differs between the planning and order-level collections) — but note that combining two findings into one confirmed story always additionally requires the exact same material AND sales office, not just material. If the section doesn't cover what the user asked, say the current view doesn't have enough data for it — do not guess. " +
+      "Frame customer-concentration + demand-shift questions ('are these materials customer-dependent and did their demand pattern shift?') differently from forecast-driver questions ('was this increase driven by a customer?'): the first is about whether two pieces of evidence co-occur at the same material+sales office (CONFIRMED/co-occurrence language is fine there), the second is a causal claim the backend cannot fully prove. For forecast-driver questions, never say a customer or customer group 'confirmed' or 'proved' the forecast increase — the backend only measures each customer's share of recent order volume, not their specific contribution to the size of the increase. Use cautious wording instead: 'appears to be', 'is likely associated with', 'may be customer-driven'. Present both the forecast-increase evidence and the customer-concentration evidence together, and say explicitly that this is an indication rather than proof. If the SALES ANALYSIS text notes that the underlying-order volume is small relative to the signal's forecast volume, repeat that limitation/low-volume caveat rather than dropping it."
+    : "";
+  const salesBlock = salesAnalysis ? `\n\nSALES ANALYSIS (backend-calculated):\n${salesAnalysis}` : "";
+
   const messages = [
     {
       role: "system",
@@ -53,14 +62,22 @@ export async function answerQuestion(question, context, history = []) {
         "You are an analyst assistant for a Sales & Operations Planning (S&OP) dashboard. " +
         "Every answer MUST be specific to the DATA CONTEXT below — cite the actual signal types, material numbers, plant numbers, months and figures from it. Do NOT invent materials, plants, or numbers that aren't present, and do NOT give generic textbook advice that isn't tied to a specific signal in the context. " +
         "When asked what to do or for suggestions, recommend concrete S&OP actions, but anchor each one to a specific signal or material/plant from the context (e.g. 'validate the +2357% surge on material 11681 at plant 28 with sales'). Match the recommendation to the signal TYPE: stockout-risk questions must use the Stockout risk signals listed, demand questions the Demand surge/drop signals, etc. — do not mix types. " +
-        "If a detail the user asks about isn't in the context, say you don't have it in the current view. Keep answers focused.\n\nDATA CONTEXT:\n" +
-        context,
+        "Never give a generic follow-up like 'check demand and validate with sales' — name the specific customer, material, and sales office involved (e.g. 'validate whether customer 2102231's recent demand for material 11696 in sales office 76 is recurring or a one-time order'). Use cautious language ('appears to', 'may indicate', 'cannot confirm', 'material-level indication only') unless the evidence is a confirmed same material+sales-office match with meaningful volume — only then use stronger language. " +
+        "If a detail the user asks about isn't in the context, say you don't have it in the current view. Keep answers focused." +
+        salesInstructions +
+        "\n\nDATA CONTEXT:\n" + context + salesBlock,
     },
     ...history.slice(-6),
     { role: "user", content: question },
   ];
   try {
-    return (await chatLLM(messages, { temperature: 0.3 })) || "I couldn't generate an answer.";
+    const answer = (await chatLLM(messages, { temperature: 0.3 })) || "I couldn't generate an answer.";
+    // Don't rely on the model to remember the matching disclosure every time —
+    // append it deterministically whenever the sales analysis was actually used.
+    if (salesAnalysis && !/sales office/i.test(answer)) {
+      return `${answer}\n\n(This analysis matched by material, sales office, period, and sales type — plant was not used, since plant mapping differs between the planning and order-level collections.)`;
+    }
+    return answer;
   } catch (e) {
     console.log("chat LLM failed:", e.message);
     return "Sorry, the assistant is unavailable right now.";

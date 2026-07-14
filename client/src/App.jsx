@@ -12,7 +12,8 @@ const typePill = {
   "New demand": "pill-teal",
 };
 const urgencyPill = { High: "pill-red", Medium: "pill-amber", Low: "pill-teal" };
-const barClass = (s) => (s >= 85 ? "bar-high" : s >= 60 ? "bar-med" : "bar-low");
+// Scores are on a 0-10 scale throughout the app: >=8 High, >=5 Medium, else Low.
+const barClass = (s) => (s >= 8 ? "bar-high" : s >= 5 ? "bar-med" : "bar-low");
 
 const TYPE_COLOR_CLASS = {
   "Demand surge": "fill-yellow",
@@ -25,11 +26,11 @@ const TYPE_COLOR_CLASS = {
 const FALLBACK_FILL_CLASSES = ["fill-blue", "fill-red", "fill-amber", "fill-teal", "fill-purple", "fill-orange"];
 
 const BUCKET_COLOR_CLASS = {
-  "0–30": "fill-teal",
-  "31–50": "fill-blue",
-  "51–70": "fill-amber",
-  "71–90": "fill-orange",
-  "90+": "fill-red",
+  "0–3": "fill-teal",
+  "3–5": "fill-blue",
+  "5–7": "fill-amber",
+  "7–9": "fill-orange",
+  "9–10": "fill-red",
 };
 
 function BarChart({ data, colorClassMap, fallbackClasses }) {
@@ -308,11 +309,11 @@ export default function App() {
           <div className="metric-val">{k.total}</div>
         </div>
         <div className="metric">
-          <div className="metric-label">High (score ≥ 85)</div>
+          <div className="metric-label">High (score ≥ 8)</div>
           <div className="metric-val red">{k.critical}</div>
         </div>
         <div className="metric">
-          <div className="metric-label">Medium (60–84)</div>
+          <div className="metric-label">Medium (5–7.9)</div>
           <div className="metric-val amber">{k.medium}</div>
         </div>
         <div className="metric">
@@ -938,7 +939,7 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
 
   const pillClass = typePill[s.type] || "pill-blue";
   const scoreBarClass = barClass(s.score);
-  const scoreBadge = s.score >= 85 ? "score-badge-high" : s.score >= 60 ? "score-badge-med" : "score-badge-low";
+  const scoreBadge = s.score >= 8 ? "score-badge-high" : s.score >= 5 ? "score-badge-med" : "score-badge-low";
 
   return (
     <>
@@ -959,7 +960,7 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
         <td>
           <div className="score-bar">
             <span className="bar-bg">
-              <span className={`bar-fill ${scoreBarClass}`} style={{ width: `${s.score}%` }} />
+              <span className={`bar-fill ${scoreBarClass}`} style={{ width: `${s.score * 10}%` }} />
             </span>
             <span className={`score-badge ${scoreBadge}`}>{s.score}</span>
           </div>
