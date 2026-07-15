@@ -4,9 +4,10 @@ import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
 import { ChevronLeft, ChevronRight, Activity, AlertTriangle, TrendingDown, SlidersHorizontal } from "lucide-react";
 
-function SearchableSelect({ value, onChange, options, placeholder = "All", labelMap = {} }) {
+function SearchableSelect({ value, onChange, options, placeholder = "All", labelMap = {}, multi = false }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [stableOrder, setStableOrder] = useState(options);
   const ref = useRef(null);
   const inputRef = useRef(null);
   const showSearch = options.length > 5;
@@ -20,45 +21,71 @@ function SearchableSelect({ value, onChange, options, placeholder = "All", label
   }, []);
 
   useEffect(() => {
-    if (open) { setSearch(""); if (showSearch) setTimeout(() => inputRef.current?.focus(), 0); }
+    if (open) {
+      setSearch("");
+      if (showSearch) setTimeout(() => inputRef.current?.focus(), 0);
+      // Snapshot order once at open time: selected items float to top, then frozen until close
+      if (multi) {
+        setStableOrder([
+          ...options.filter((o) => value.includes(o)),
+          ...options.filter((o) => !value.includes(o)),
+        ]);
+      } else {
+        setStableOrder(options);
+      }
+    }
   }, [open]);
 
   const displayLabel = (o) => labelMap[o] || o;
-  const filtered = options.filter((o) => displayLabel(o).toLowerCase().includes(search.toLowerCase()));
-  const label = value === "all" ? placeholder : displayLabel(value);
+
+  const isActive = (o) => multi ? value.includes(o) : value === o;
+  const isAllActive = multi ? value.length === 0 : value === "all";
+
+  const sortedFiltered = stableOrder.filter((o) =>
+    displayLabel(o).toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="ss-wrap" ref={ref}>
-      <button className={`ss-trigger ${open ? "ss-trigger-open" : ""}`} onClick={() => setOpen((v) => !v)}>
-        <span className="ss-trigger-label">{label}</span>
+      <button className={`ss-trigger ${open ? "ss-trigger-open" : ""} ${multi && value.length > 0 ? "ss-trigger-active" : ""}`}
+        onClick={() => setOpen((v) => !v)}>
+        <span className="ss-trigger-label">{placeholder}</span>
       </button>
       {open && (
         <div className="ss-dropdown">
           {showSearch && (
             <div className="ss-search-row">
-              <input
-                ref={inputRef}
-                className="ss-search"
-                type="text"
-                placeholder="Search…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+              <input ref={inputRef} className="ss-search" type="text" placeholder="Search…"
+                value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
           )}
           <div className="ss-list">
-            <button className={`ss-option ${value === "all" ? "ss-option-active" : ""}`}
-              onClick={() => { onChange("all"); setOpen(false); }}>
-              {placeholder}
-            </button>
-            {filtered.length === 0 && <div className="ss-empty">No match</div>}
-            {filtered.map((o) => (
-              <button key={o} className={`ss-option ${value === o ? "ss-option-active" : ""}`}
-                onClick={() => { onChange(o); setOpen(false); }}>
-                {displayLabel(o)}
+            {!multi && (
+              <button className={`ss-option ${value === "all" ? "ss-option-active" : ""}`}
+                onClick={() => { onChange("all"); setOpen(false); }}>
+                {placeholder}
+              </button>
+            )}
+            {sortedFiltered.length === 0 && <div className="ss-empty">No match</div>}
+            {sortedFiltered.map((o) => (
+              <button key={o} className={`ss-option ${isActive(o) ? "ss-option-active" : ""}`}
+                onClick={() => { onChange(o); if (!multi) setOpen(false); }}>
+                {multi && <span className={`ss-checkbox ${isActive(o) ? "ss-checkbox-checked" : ""}`} />}
+                <span className="ss-option-label">{displayLabel(o)}</span>
               </button>
             ))}
           </div>
+          {multi && (
+            <div className="ss-footer">
+              <span className="ss-footer-count">
+                {value.length > 0
+                  ? <><span className="ss-count">{value.length}</span> selected</>
+                  : "None selected"}
+              </span>
+              <button className="ss-clear" onClick={() => onChange("all")} disabled={value.length === 0}>Clear</button>
+              <button className="ss-done" onClick={() => setOpen(false)}>Done</button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -176,9 +203,14 @@ export default function App() {
   const [dash, setDash] = useState(null);
   const [allSignals, setAllSignals] = useState([]);
   const [rules, setRules] = useState([]);
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [urgencyFilter, setUrgencyFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilters, setTypeFilters] = useState([]);
+  const [urgencyFilter, setUrgencyFilter] = useState([]);
+  const [statusFilter, setStatusFilter] = useState([]);
+  const [savedFilters, setSavedFilters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("sop-saved-filters") || "[]"); } catch { return []; }
+  });
+  const [saveInputOpen, setSaveInputOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
   const [rulesSearch, setRulesSearch] = useState("");
   const [builder, setBuilder] = useState(null);
   const [expanded, setExpanded] = useState(null);
@@ -188,7 +220,21 @@ export default function App() {
   const [statuses, setStatuses] = useState({});
   const [highlightId, setHighlightId] = useState(null);
   const [scrollTarget, setScrollTarget] = useState(null);
+  const saveRef = useRef(null);
   const PAGE_SIZE = 100;
+
+  const STATUS_LABELS = { open: "Open", escalated: "Escalated", actioned: "Actioned", snoozed: "Snoozed" };
+
+  const autoFilterName = () => {
+    const parts = [];
+    if (typeFilters.length > 0) {
+      const names = typeFilters.slice(0, 2).join(", ");
+      parts.push(typeFilters.length > 2 ? `${names} +${typeFilters.length - 2}` : names);
+    }
+    if (urgencyFilter.length > 0) parts.push(urgencyFilter.join(", "));
+    if (statusFilter.length > 0) parts.push(statusFilter.map((s) => STATUS_LABELS[s] || s).join(", "));
+    return parts.join(" · ") || "My view";
+  };
 
   async function regenerateBriefing() {
     setBriefingLoading(true);
@@ -217,6 +263,13 @@ export default function App() {
     getSignalStatuses().then(setStatuses).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!saveInputOpen) return;
+    function handle(e) { if (saveRef.current && !saveRef.current.contains(e.target)) setSaveInputOpen(false); }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [saveInputOpen]);
+
   // Scroll to (and briefly highlight) a signal row after a briefing link is clicked.
   // Runs after the page/expanded state has committed so the target row is mounted.
   useEffect(() => {
@@ -232,9 +285,9 @@ export default function App() {
   function goToSignal(sig) {
     if (!sig) return;
     // Clear filters so the signal is guaranteed to be visible, then locate its page.
-    setTypeFilter("all");
-    setUrgencyFilter("all");
-    setStatusFilter("all");
+    setTypeFilters([]);
+    setUrgencyFilter([]);
+    setStatusFilter([]);
     const idx = allSignals.findIndex((x) => x.id === sig.id);
     if (idx === -1) return;
     setPage(Math.floor(idx / PAGE_SIZE));
@@ -263,7 +316,7 @@ export default function App() {
   }
 
   async function handleExportCSV() {
-    const signals = typeFilter === "all" ? allSignals : allSignals.filter(s => s.type === typeFilter);
+    const signals = typeFilters.length === 0 ? allSignals : allSignals.filter(s => typeFilters.includes(s.type));
     const briefingText = aiBriefing || dash.briefing || "";
     const header = ["Type", "Material", "Plant", "Sales Office", "Month", "Severity", "Priority", "Detail", "Status"].join(",");
     const rows = signals.map((s) => {
@@ -290,12 +343,11 @@ export default function App() {
 
   // All filtering and pagination is client-side — no server round-trips needed.
   const filteredSignals = allSignals.filter((s) => {
-    if (typeFilter !== "all" && s.type !== typeFilter) return false;
-    if (urgencyFilter !== "all" && s.priority !== urgencyFilter) return false;
-    if (statusFilter !== "all") {
+    if (typeFilters.length > 0 && !typeFilters.includes(s.type)) return false;
+    if (urgencyFilter.length > 0 && !urgencyFilter.includes(s.priority)) return false;
+    if (statusFilter.length > 0) {
       const st = statuses[s.key]?.status || null;
-      if (statusFilter === "open" && st !== null) return false;
-      if (statusFilter !== "open" && st !== statusFilter) return false;
+      if (!statusFilter.includes(st === null ? "open" : st)) return false;
     }
     return true;
   });
@@ -307,12 +359,75 @@ export default function App() {
 
   const k = dash.kpis;
 
-  const handleTypeChange = (newType) => {
-    setTypeFilter(newType);
-    setUrgencyFilter("all");
-    setStatusFilter("all");
+  const handleTypeToggle = (type) => {
+    setTypeFilters((prev) =>
+      type === "all" ? [] : prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    );
     setExpanded(null);
     setPage(0);
+  };
+
+  const handleUrgencyToggle = (v) => {
+    setUrgencyFilter((prev) =>
+      v === "all" ? [] : prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]
+    );
+    setExpanded(null);
+    setPage(0);
+  };
+
+  const handleStatusToggle = (v) => {
+    setStatusFilter((prev) =>
+      v === "all" ? [] : prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]
+    );
+    setExpanded(null);
+    setPage(0);
+  };
+
+  const hasActiveFilters = typeFilters.length > 0 || urgencyFilter.length > 0 || statusFilter.length > 0;
+
+  const sortedKey = (arr) => [...arr].sort().join("|");
+  const isCurrentFilterSaved = savedFilters.some((f) =>
+    sortedKey(f.types) === sortedKey(typeFilters) &&
+    sortedKey(f.severity) === sortedKey(urgencyFilter) &&
+    sortedKey(f.status) === sortedKey(statusFilter)
+  );
+  const canPin = hasActiveFilters && !isCurrentFilterSaved;
+
+  const clearAllFilters = () => {
+    setTypeFilters([]);
+    setUrgencyFilter([]);
+    setStatusFilter([]);
+    setPage(0);
+    setExpanded(null);
+  };
+
+  const saveCurrentFilters = () => {
+    const name = saveName.trim();
+    if (!name) return;
+    const entry = { id: Date.now(), name, types: typeFilters, severity: urgencyFilter, status: statusFilter };
+    setSavedFilters((prev) => {
+      const next = [...prev, entry];
+      localStorage.setItem("sop-saved-filters", JSON.stringify(next));
+      return next;
+    });
+    setSaveName("");
+    setSaveInputOpen(false);
+  };
+
+  const applySavedFilter = (f) => {
+    setTypeFilters(f.types);
+    setUrgencyFilter(f.severity);
+    setStatusFilter(f.status);
+    setPage(0);
+    setExpanded(null);
+  };
+
+  const deleteSavedFilter = (id) => {
+    setSavedFilters((prev) => {
+      const next = prev.filter((f) => f.id !== id);
+      localStorage.setItem("sop-saved-filters", JSON.stringify(next));
+      return next;
+    });
   };
 
   const handleNext = () => setPage((p) => Math.min(p + 1, totalPages - 1));
@@ -456,7 +571,7 @@ export default function App() {
                   <button className="link-btn" onClick={async () => {
                     // Optimistic: remove immediately from rules list
                     setRules((prev) => prev.filter((x) => x._id !== r._id));
-                    if (typeFilter === r.name) { setTypeFilter("all"); setPage(0); }
+                    if (typeFilters.includes(r.name)) { setTypeFilters([]); setPage(0); }
                     await deleteRule(r._id);
                     refresh({ fetchRules: true });
                   }}>Delete</button>
@@ -468,7 +583,7 @@ export default function App() {
       )}
 
       {/* signal table */}
-      <div className="card">
+      <div className="card signal-card">
         <div className="table-header-row">
           <div>
             <div className="table-title">Signal table — prioritised</div>
@@ -488,26 +603,67 @@ export default function App() {
             </div>
 
             <SearchableSelect
-              value={typeFilter}
-              onChange={(v) => handleTypeChange(v)}
+              value={typeFilters}
+              onChange={handleTypeToggle}
               options={dropdownTypes}
               placeholder="All types"
+              multi
             />
 
             <SearchableSelect
               value={urgencyFilter}
-              onChange={(v) => { setUrgencyFilter(v); setExpanded(null); }}
+              onChange={handleUrgencyToggle}
               options={["High", "Medium", "Low"]}
               placeholder="All severity"
+              multi
             />
 
             <SearchableSelect
               value={statusFilter}
-              onChange={(v) => { setStatusFilter(v); setExpanded(null); }}
+              onChange={handleStatusToggle}
               options={["open", "escalated", "actioned", "snoozed"]}
               placeholder="All status"
               labelMap={{ open: "Open (unmarked)", escalated: "Escalated", actioned: "Actioned", snoozed: "Snoozed" }}
+              multi
             />
+
+            <button
+              className="clear-filters-btn"
+              disabled={!hasActiveFilters}
+              onClick={clearAllFilters}
+            >Clear all</button>
+
+            <div className="save-filter-wrap" ref={saveRef}>
+              <button
+                className="save-filter-btn"
+                disabled={!canPin}
+                onClick={() => { setSaveInputOpen((v) => !v); if (!saveInputOpen) setSaveName(autoFilterName()); }}
+                title={!hasActiveFilters ? "Select filters first" : isCurrentFilterSaved ? "Already pinned" : "Pin current filters"}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                Pin view
+              </button>
+              {saveInputOpen && (
+                <div className="save-filter-popover">
+                  <div className="sfp-title">Pin this filter view</div>
+                  <div className="sfp-hint">Give it a name to find it quickly later.</div>
+                  <input
+                    autoFocus
+                    className="sfp-input"
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveCurrentFilters();
+                      if (e.key === "Escape") setSaveInputOpen(false);
+                    }}
+                  />
+                  <div className="sfp-actions">
+                    <button className="btn btn-primary sfp-save" onClick={saveCurrentFilters} disabled={!saveName.trim()}>Save</button>
+                    <button className="btn" onClick={() => setSaveInputOpen(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <button className="btn export-btn" onClick={handleExportCSV} title="Export all signals to CSV">
               ↓ Export CSV
@@ -515,16 +671,28 @@ export default function App() {
           </div>
         </div>
 
+        {savedFilters.length > 0 && (
+          <div className="saved-filters-row">
+            <span className="saved-filters-label">Pinned</span>
+            {savedFilters.map((f) => (
+              <button key={f.id} className="saved-filter-chip" onClick={() => applySavedFilter(f)}>
+                {f.name}
+                <span className="saved-chip-x" title="Remove" onClick={(e) => { e.stopPropagation(); deleteSavedFilter(f.id); }}>×</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {pagedSignals.length === 0 ? (
           <div className="empty-state">No signals match the current filters.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="signal-table-wrap" style={{ overflowX: "auto" }}>
             <table>
               <thead>
                 <tr>
                   <th>Signal</th><th>Material</th><th>Plant</th>
                   <th>Month</th><th>Severity</th><th>Priority</th>
-                  <th>Detail</th><th>Actions</th>
+                  <th>Reason</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -1043,8 +1211,12 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
             <span className={`score-badge ${scoreBadge}`}>{s.score}</span>
           </div>
         </td>
-        <td style={{ color: "var(--text-2)" }}>{s.detail}</td>
-        <td><button className="btn" onClick={(e) => { e.stopPropagation(); onToggle(); }}>{expanded ? "Hide" : "Detail"}</button></td>
+        <td><span className="detail-text" title={s.detail}>{s.detail}</span></td>
+        <td className="expand-cell">
+          <button className={`expand-btn${expanded ? " expand-btn-open" : ""}`} onClick={(e) => { e.stopPropagation(); onToggle(); }} title={expanded ? "Collapse" : "Expand"}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </td>
       </tr>
       {expanded && (
         <tr>
