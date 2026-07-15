@@ -1,8 +1,69 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, getSignalStatuses, setSignalStatus, clearSignalStatus, updateSignal, getAiRecommendations } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Activity, AlertTriangle, TrendingDown, SlidersHorizontal } from "lucide-react";
+
+function SearchableSelect({ value, onChange, options, placeholder = "All", labelMap = {} }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+  const showSearch = options.length > 5;
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (open) { setSearch(""); if (showSearch) setTimeout(() => inputRef.current?.focus(), 0); }
+  }, [open]);
+
+  const displayLabel = (o) => labelMap[o] || o;
+  const filtered = options.filter((o) => displayLabel(o).toLowerCase().includes(search.toLowerCase()));
+  const label = value === "all" ? placeholder : displayLabel(value);
+
+  return (
+    <div className="ss-wrap" ref={ref}>
+      <button className={`ss-trigger ${open ? "ss-trigger-open" : ""}`} onClick={() => setOpen((v) => !v)}>
+        <span className="ss-trigger-label">{label}</span>
+      </button>
+      {open && (
+        <div className="ss-dropdown">
+          {showSearch && (
+            <div className="ss-search-row">
+              <input
+                ref={inputRef}
+                className="ss-search"
+                type="text"
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          )}
+          <div className="ss-list">
+            <button className={`ss-option ${value === "all" ? "ss-option-active" : ""}`}
+              onClick={() => { onChange("all"); setOpen(false); }}>
+              {placeholder}
+            </button>
+            {filtered.length === 0 && <div className="ss-empty">No match</div>}
+            {filtered.map((o) => (
+              <button key={o} className={`ss-option ${value === o ? "ss-option-active" : ""}`}
+                onClick={() => { onChange(o); setOpen(false); }}>
+                {displayLabel(o)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const typePill = {
   "Stockout risk": "pill-red",
@@ -33,7 +94,7 @@ const BUCKET_COLOR_CLASS = {
   "9–10": "fill-red",
 };
 
-function BarChart({ data, colorClassMap, fallbackClasses }) {
+function BarChart({ data, colorClassMap, fallbackClasses, compact }) {
   const max = Math.max(1, ...Object.values(data));
   const entries = Object.entries(data);
   return (
@@ -45,7 +106,7 @@ function BarChart({ data, colorClassMap, fallbackClasses }) {
           "fill-blue";
         return (
           <div className="cbar" key={label}>
-            <span className="cbar-label">{label}</span>
+            <span className={compact ? "cbar-label cbar-label-compact" : "cbar-label"}>{label}</span>
             <span className="cbar-track">
               <span
                 className={`cbar-fill ${fillClass}`}
@@ -118,6 +179,7 @@ export default function App() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [rulesSearch, setRulesSearch] = useState("");
   const [builder, setBuilder] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [page, setPage] = useState(0);
@@ -203,7 +265,7 @@ export default function App() {
   async function handleExportCSV() {
     const signals = typeFilter === "all" ? allSignals : allSignals.filter(s => s.type === typeFilter);
     const briefingText = aiBriefing || dash.briefing || "";
-    const header = ["Type", "Material", "Plant", "Sales Office", "Month", "Priority", "Score", "Detail", "Status"].join(",");
+    const header = ["Type", "Material", "Plant", "Sales Office", "Month", "Severity", "Priority", "Detail", "Status"].join(",");
     const rows = signals.map((s) => {
       const st = statuses[s.key]?.status || "open";
       return [
@@ -263,28 +325,31 @@ export default function App() {
   ];
 
   return (
-    <div className="db">
-      {/* top bar */}
+    <>
+      {/* top bar — full viewport width, outside the max-width container */}
       <div className="topbar">
-        <div className="topbar-brand">
-          <div className="topbar-tk-logo">
-            {/* ThyssenKrupp three-circle mark */}
-            <svg width="34" height="34" viewBox="0 0 50 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <circle cx="25" cy="17" r="14" stroke="white" strokeWidth="2.6"/>
-              <circle cx="14" cy="37" r="14" stroke="white" strokeWidth="2.6"/>
-              <circle cx="36" cy="37" r="14" stroke="white" strokeWidth="2.6"/>
-            </svg>
-            <span className="tk-logo-name">thyssenkrupp</span>
+        <div className="topbar-inner">
+          <div className="topbar-brand">
+            <div className="topbar-tk-logo">
+              {/* ThyssenKrupp three-circle mark */}
+              <svg width="34" height="34" viewBox="0 0 50 52" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <circle cx="25" cy="17" r="14" stroke="white" strokeWidth="2.6"/>
+                <circle cx="14" cy="37" r="14" stroke="white" strokeWidth="2.6"/>
+                <circle cx="36" cy="37" r="14" stroke="white" strokeWidth="2.6"/>
+              </svg>
+              <span className="tk-logo-name">thyssenkrupp</span>
+            </div>
+            <div className="topbar-divider" />
+            <div>
+              <div className="topbar-title">S&amp;OP Signal Dashboard</div>
+              <div className="topbar-meta">Planning cycle 2026-06 · {k.rulesActive} active custom rules</div>
+            </div>
           </div>
-          <div className="topbar-divider" />
-          <div>
-            <div className="topbar-title">S&amp;OP Signal Dashboard</div>
-            <div className="topbar-meta">Planning cycle 2026-06 · {k.rulesActive} active custom rules</div>
-          </div>
+          <button className="btn btn-primary" onClick={() => setBuilder({})}>+ Add rule</button>
         </div>
-        <button className="btn btn-primary" onClick={() => setBuilder({})}>+ Add rule</button>
       </div>
 
+    <div className="db">
       {/* Briefing */}
       <div className="briefing-box">
         <div className="briefing-box-header">
@@ -305,20 +370,36 @@ export default function App() {
       {/* KPI cards */}
       <div className="metrics">
         <div className="metric">
-          <div className="metric-label">Total signals</div>
+          <div className="metric-header">
+            <span className="metric-label">Total signals</span>
+            <Activity size={15} className="metric-icon" />
+          </div>
           <div className="metric-val">{k.total}</div>
+          <div className="metric-sub">all active signals</div>
         </div>
-        <div className="metric">
-          <div className="metric-label">High (score ≥ 8)</div>
+        <div className="metric metric-critical">
+          <div className="metric-header">
+            <span className="metric-label">High severity</span>
+            <AlertTriangle size={15} className="metric-icon" />
+          </div>
           <div className="metric-val red">{k.critical}</div>
+          <div className="metric-sub">priority ≥ 85</div>
         </div>
-        <div className="metric">
-          <div className="metric-label">Medium (5–7.9)</div>
+        <div className="metric metric-medium">
+          <div className="metric-header">
+            <span className="metric-label">Medium severity</span>
+            <TrendingDown size={15} className="metric-icon" />
+          </div>
           <div className="metric-val amber">{k.medium}</div>
+          <div className="metric-sub">priority 60 – 84</div>
         </div>
-        <div className="metric">
-          <div className="metric-label">Custom rules active</div>
+        <div className="metric metric-rules">
+          <div className="metric-header">
+            <span className="metric-label">Custom rules active</span>
+            <SlidersHorizontal size={15} className="metric-icon" />
+          </div>
           <div className="metric-val green">{k.rulesActive}</div>
+          <div className="metric-sub">user-defined</div>
         </div>
       </div>
 
@@ -333,10 +414,11 @@ export default function App() {
           />
         </div>
         <div className="card">
-          <div className="card-title">Score distribution</div>
+          <div className="card-title">Priority distribution</div>
           <BarChart
             data={dash.byBucket}
             colorClassMap={BUCKET_COLOR_CLASS}
+            compact
           />
         </div>
       </div>
@@ -344,9 +426,23 @@ export default function App() {
       {/* custom rules list */}
       {rules.length > 0 && (
         <div className="card spacer">
-          <div className="card-title">Custom rules</div>
-          <div className="rules-list">
-            {rules.map((r) => (
+          <div className="rules-card-header">
+            <div className="card-title">
+              Custom rules
+              <span className="rules-count">{rules.length}</span>
+            </div>
+            {rules.length > 4 && (
+              <input
+                className="rules-search"
+                type="search"
+                placeholder="Search rules…"
+                value={rulesSearch}
+                onChange={(e) => setRulesSearch(e.target.value)}
+              />
+            )}
+          </div>
+          <div className="rules-list rules-list-scroll">
+            {rules.filter((r) => r.name?.toLowerCase().includes(rulesSearch.toLowerCase())).map((r) => (
               <div className="rule-item" key={r._id}>
                 <div>
                   <b>{r.name}</b>{" "}
@@ -374,62 +470,44 @@ export default function App() {
       {/* signal table */}
       <div className="card">
         <div className="table-header-row">
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div className="card-title" style={{ margin: 0 }}>
-              Signal table — prioritised ({displayStart}–{displayEnd}) of {filteredSignals.length}
-            </div>
-            <div className="card-title">
-              Page {safePage + 1} of {totalPages}
+          <div>
+            <div className="table-title">Signal table — prioritised</div>
+            <div className="table-subtitle">
+              {displayStart}–{displayEnd} of {filteredSignals.length} signals &nbsp;·&nbsp; Page {safePage + 1} of {totalPages}
             </div>
           </div>
 
           <div className="filters">
-            <div>
-              <button
-                onClick={handlePrev}
-                disabled={safePage === 0}
-                style={{
-                  padding: "5px 8px", fontSize: "10px",
-                  cursor: safePage === 0 ? "not-allowed" : "pointer",
-                  opacity: safePage === 0 ? 0.5 : 1,
-                  border: "1px solid grey", backgroundColor: "#fff",
-                  color: "grey", borderRadius: "4px",
-                }}>
-                <ChevronLeft size={18} />
+            <div className="pag-btns">
+              <button className="pag-btn" onClick={handlePrev} disabled={safePage === 0}>
+                <ChevronLeft size={14} />
               </button>
-              <button
-                onClick={handleNext}
-                disabled={safePage >= totalPages - 1}
-                style={{
-                  padding: "5px 8px", fontSize: "10px",
-                  cursor: safePage >= totalPages - 1 ? "not-allowed" : "pointer",
-                  opacity: safePage >= totalPages - 1 ? 0.5 : 1,
-                  border: "1px solid grey", backgroundColor: "#fff",
-                  color: "grey", borderRadius: "4px", marginLeft: "8px",
-                }}>
-                <ChevronRight size={18} />
+              <button className="pag-btn" onClick={handleNext} disabled={safePage >= totalPages - 1}>
+                <ChevronRight size={14} />
               </button>
             </div>
 
-            <select value={typeFilter} onChange={(e) => handleTypeChange(e.target.value)}>
-              <option value="all">All types</option>
-              {dropdownTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <SearchableSelect
+              value={typeFilter}
+              onChange={(v) => handleTypeChange(v)}
+              options={dropdownTypes}
+              placeholder="All types"
+            />
 
-            <select value={urgencyFilter} onChange={(e) => { setUrgencyFilter(e.target.value); setExpanded(null); }}>
-              <option value="all">All urgency</option>
-              <option value="High">High</option>
-              <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
-            </select>
+            <SearchableSelect
+              value={urgencyFilter}
+              onChange={(v) => { setUrgencyFilter(v); setExpanded(null); }}
+              options={["High", "Medium", "Low"]}
+              placeholder="All severity"
+            />
 
-            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setExpanded(null); }}>
-              <option value="all">All status</option>
-              <option value="open">Open (unmarked)</option>
-              <option value="escalated">Escalated</option>
-              <option value="actioned">Actioned</option>
-              <option value="snoozed">Snoozed</option>
-            </select>
+            <SearchableSelect
+              value={statusFilter}
+              onChange={(v) => { setStatusFilter(v); setExpanded(null); }}
+              options={["open", "escalated", "actioned", "snoozed"]}
+              placeholder="All status"
+              labelMap={{ open: "Open (unmarked)", escalated: "Escalated", actioned: "Actioned", snoozed: "Snoozed" }}
+            />
 
             <button className="btn export-btn" onClick={handleExportCSV} title="Export all signals to CSV">
               ↓ Export CSV
@@ -445,7 +523,7 @@ export default function App() {
               <thead>
                 <tr>
                   <th>Signal</th><th>Material</th><th>Plant</th>
-                  <th>Month</th><th>Urgency</th><th>Score</th>
+                  <th>Month</th><th>Severity</th><th>Priority</th>
                   <th>Detail</th><th>Actions</th>
                 </tr>
               </thead>
@@ -488,6 +566,7 @@ export default function App() {
 
       <Chat />
     </div>
+    </>
   );
 }
 
@@ -945,9 +1024,8 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
     <>
       <tr
         id={`signal-row-${s.id}`}
-        className={`signal-row${highlighted ? " signal-row-highlight" : ""}`}
+        className={`signal-row prio-${(s.priority || "low").toLowerCase()}${highlighted ? " signal-row-highlight" : ""}`}
         onClick={onToggle}
-        style={{ cursor: "pointer" }}
       >
         <td>
           <span className={`pill ${pillClass}`}>{s.type}</span>
