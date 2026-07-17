@@ -271,12 +271,13 @@ const EMPTY_COND = () => ({
   baseline: null,
 });
 
-const EMPTY_GROUP = () => ({ logic: "AND", conditions: [EMPTY_COND()], score: 6 });
+const EMPTY_GROUP = () => ({ logic: "AND", conditions: [EMPTY_COND()] });
 
 const EMPTY_DRAFT = () => ({
   name: "",
   groups: [EMPTY_GROUP()],
   groupLogic: "OR",
+  score: 6.5,
   severity: "medium",
   group_by: [],
   raw_sentence: "",
@@ -486,7 +487,6 @@ function GroupCard({ group, groupIndex, totalGroups, groupLogic, onUpdateGroup, 
           <span className="rb-group-label">of these conditions</span>
         </div>
         <div className="rb-group-header-right">
-          <GroupSeverityBars score={group.score ?? 6} onChange={(sc) => onUpdateGroup({ score: sc })} />
           {totalGroups > 1 && (
             <button className="rb-remove-group" onClick={onRemoveGroup}>Remove group</button>
           )}
@@ -672,12 +672,11 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
       // Persist the rule-level criticality score (the backend reads rule.score) and
       // keep severity in sync with it.
       const score = draft.score ?? severityToScore(draft.severity || "medium");
-      toSave = { ...draft, score, severity: scoreToSeverity(score), active: true };
+      toSave = { ...draft, score, severity: draft.severity || scoreToSeverity(score), active: true };
     } else {
+      const score = draft.score ?? severityToScore(draft.severity || "medium");
       const cleanGroups = draft.groups.map((g) => ({
         logic: g.logic,
-        score: g.score ?? 6,
-        severity: scoreToSeverity(g.score ?? 6),
         conditions: g.conditions.map(({ baseline, threshold, ...c }) => ({
           ...c,
           threshold: parseFloat(threshold) || 0,
@@ -685,7 +684,6 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
         })),
       }));
       const firstCond = cleanGroups[0]?.conditions[0] || {};
-      const { score: overallScore, severity: overallSeverity } = calcOverallScore(cleanGroups);
       toSave = {
         ...draft, groups: cleanGroups, groupLogic: draft.groupLogic,
         conditions: cleanGroups[0]?.conditions || [],
@@ -694,8 +692,8 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
         threshold: firstCond.threshold ?? 0,
         comparison_type: firstCond.comparison_type,
         baseline: firstCond.baseline,
-        score: overallScore,
-        severity: overallSeverity,
+        score,
+        severity: draft.severity || scoreToSeverity(score),
         active: true,
       };
     }
@@ -710,13 +708,11 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
       : draft?.groups?.every((g) => g.conditions.length > 0)
   );
 
-  // Current criticality (score + severity) that drives the score card and the
-  // severity pills. Formula rules carry the score on the rule itself; structured
-  // rules derive it from the worst group score.
-  const crit = !draft ? null
-    : conditionMode === "formula"
-      ? (() => { const score = draft.score ?? severityToScore(draft.severity || "medium"); return { score, severity: scoreToSeverity(score) }; })()
-      : calcOverallScore(draft.groups);
+  // Both modes use draft.score directly — set by the unified slider/pills at the bottom.
+  const crit = !draft ? null : (() => {
+    const score = draft.score ?? severityToScore(draft.severity || "medium");
+    return { score, severity: draft.severity || scoreToSeverity(score) };
+  })();
 
   return (
     <div className="overlay">
@@ -1003,69 +999,35 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
                 )}
               </div>
 
-              {/* Criticality slider — formula rules have no per-group sliders, so this
-                  single control drives the rule's score. Same slider component as the
-                  manual builder's group cards, and it feeds the score card + pills below. */}
-              {conditionMode === "formula" && (
-                <div className="rb-field">
-                  <label className="rb-label">Criticality</label>
-                  <div className="rb-formula-sev">
-                    <span className="rb-group-label">Set how critical this rule is</span>
-                    <GroupSeverityBars
-                      score={crit.score}
-                      onChange={(sc) => setDraft((d) => ({ ...d, score: sc, severity: scoreToSeverity(sc) }))}
+              {/* Unified scoring — single slider + clickable severity pills */}
+              {crit && (
+                <div className="rb-scoring-section">
+                  <div className="rb-sev-row">
+                    <label className="rb-label">Severity</label>
+                    <div className="rb-sev-pills">
+                      {SEVERITIES.map((s) => (
+                        <button
+                          key={s}
+                          className={`rb-sev-pill rb-sev-pill-${s}${crit.severity === s ? " active" : ""}`}
+                          onClick={() => setDraft((d) => ({ ...d, severity: s }))}
+                        >
+                          {s.charAt(0).toUpperCase() + s.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rb-score-row">
+                    <label className="rb-label">Priority</label>
+                    <input
+                      type="range" min={0} max={10} step={0.5}
+                      value={crit.score}
+                      onChange={(e) => setDraft((d) => ({ ...d, score: Number(e.target.value) }))}
+                      className="rb-score-slider"
                     />
+                    <span className="rb-scoring-val">{crit.score}/10</span>
                   </div>
                 </div>
               )}
-
-              {/* Score card — reflects the calculated severity in both modes: from the
-                  group sliders (structured) or the criticality slider (formula). */}
-              {crit && (conditionMode === "formula" || draft.groups.length > 0) && (() => {
-                const st = SEV_STYLE[crit.severity];
-                const sub = conditionMode === "formula"
-                  ? "Based on the criticality slider above"
-                  : `Highest severity across ${draft.groups.length} group${draft.groups.length > 1 ? "s" : ""}`;
-                return (
-                  <div className="rb-field">
-                    <div className="rb-scorecard" style={{ background: st.bg, border: `1px solid ${st.border}` }}>
-                      <div className="rb-scorecard-left">
-                        <span className="rb-scorecard-title">Calculated score</span>
-                        <span className="rb-scorecard-sub">{sub}</span>
-                      </div>
-                      <div className="rb-scorecard-right">
-                        <span className="rb-scorecard-score" style={{ color: st.color }}>{crit.score}/10</span>
-                        <span className="rb-scorecard-sev" style={{ color: st.color }}>
-                          {crit.severity.charAt(0).toUpperCase() + crit.severity.slice(1)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Severity — derived (read-only) from the score above in both modes. The
-                  active pill tracks the slider dynamically. */}
-              <div className="rb-field">
-                <label className="rb-label">Severity</label>
-                <div className="rb-sev-row">
-                  {SEVERITIES.map((s) => {
-                    const active = crit?.severity === s;
-                    const st = SEV_STYLE[s];
-                    return (
-                      <button
-                        key={s}
-                        className="rb-sev-pill"
-                        style={active ? { background: st.bg, border: `1px solid ${st.border}`, color: st.color } : {}}
-                        disabled
-                        title={conditionMode === "formula" ? "Derived from the criticality slider above" : "Derived from each group's score above"}
-                      >
-                        {s.charAt(0).toUpperCase() + s.slice(1)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
 
               <div className="rb-footer">
                 <button className="btn" onClick={onClose}>Cancel</button>
