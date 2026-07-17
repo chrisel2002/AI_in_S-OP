@@ -218,6 +218,7 @@ export default function App() {
   const [aiBriefing, setAiBriefing] = useState(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [statuses, setStatuses] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
   const [highlightId, setHighlightId] = useState(null);
   const [scrollTarget, setScrollTarget] = useState(null);
   const saveRef = useRef(null);
@@ -247,15 +248,18 @@ export default function App() {
   }
 
   async function refresh({ fetchRules = false } = {}) {
-    const fetches = [getDashboard()];
-    console.log('fetches', fetches);
-    if (fetchRules) fetches.push(getRules());
-    const [d, r] = await Promise.all(fetches);
-    console.log('dashboard', d);
-    setDash(d);
-    if (d.allSignals) setAllSignals(d.allSignals);
-    if (r) setRules(r);
-    setPage(0);
+    setRefreshing(true);
+    try {
+      const fetches = [getDashboard()];
+      if (fetchRules) fetches.push(getRules());
+      const [d, r] = await Promise.all(fetches);
+      setDash(d);
+      if (d.allSignals) setAllSignals(d.allSignals);
+      if (r) setRules(r);
+      setPage(0);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   useEffect(() => {
@@ -469,9 +473,6 @@ export default function App() {
       <div className="briefing-box">
         <div className="briefing-box-header">
           <span className="briefing-box-title">✨ Planning Briefing</span>
-          <button className="link-btn" onClick={regenerateBriefing} disabled={briefingLoading}>
-            {briefingLoading ? "Generating…" : "Regenerate with AI"}
-          </button>
         </div>
         <div className="briefing-box-text">
           <InteractiveBriefing
@@ -490,7 +491,6 @@ export default function App() {
             <Activity size={15} className="metric-icon" />
           </div>
           <div className="metric-val">{k.total}</div>
-          <div className="metric-sub">all active signals</div>
         </div>
         <div className="metric metric-critical">
           <div className="metric-header">
@@ -498,7 +498,6 @@ export default function App() {
             <AlertTriangle size={15} className="metric-icon" />
           </div>
           <div className="metric-val red">{k.critical}</div>
-          <div className="metric-sub">priority ≥ 85</div>
         </div>
         <div className="metric metric-medium">
           <div className="metric-header">
@@ -506,7 +505,6 @@ export default function App() {
             <TrendingDown size={15} className="metric-icon" />
           </div>
           <div className="metric-val amber">{k.medium}</div>
-          <div className="metric-sub">priority 60 – 84</div>
         </div>
         <div className="metric metric-rules">
           <div className="metric-header">
@@ -514,7 +512,6 @@ export default function App() {
             <SlidersHorizontal size={15} className="metric-icon" />
           </div>
           <div className="metric-val green">{k.rulesActive}</div>
-          <div className="metric-sub">user-defined</div>
         </div>
       </div>
 
@@ -586,7 +583,12 @@ export default function App() {
       <div className="card signal-card">
         <div className="table-header-row">
           <div>
-            <div className="table-title">Signal table — prioritised</div>
+            <div className="table-title-row">
+              <div className="table-title">Signal table — prioritised</div>
+              <button className={`refresh-btn${refreshing ? " refresh-btn-spinning" : ""}`} onClick={() => refresh({ fetchRules: true })} title="Refresh signals" disabled={refreshing}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
+              </button>
+            </div>
             <div className="table-subtitle">
               {displayStart}–{displayEnd} of {filteredSignals.length} signals &nbsp;·&nbsp; Page {safePage + 1} of {totalPages}
             </div>
@@ -683,7 +685,33 @@ export default function App() {
           </div>
         )}
 
-        {pagedSignals.length === 0 ? (
+        {refreshing ? (
+          <div className="signal-table-wrap" style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Signal</th><th>Material</th><th>Plant</th>
+                  <th>Month</th><th>Severity</th><th>Priority</th>
+                  <th>Reason</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i} className="skeleton-row">
+                    <td><div className="skeleton-cell" style={{ width: "75%" }} /></td>
+                    <td><div className="skeleton-cell" style={{ width: "55%" }} /></td>
+                    <td><div className="skeleton-cell" style={{ width: "45%" }} /></td>
+                    <td><div className="skeleton-cell" style={{ width: "65%" }} /></td>
+                    <td><div className="skeleton-cell" style={{ width: "50%" }} /></td>
+                    <td><div className="skeleton-cell" style={{ width: "38%" }} /></td>
+                    <td><div className="skeleton-cell" style={{ width: "88%" }} /></td>
+                    <td><div className="skeleton-cell" style={{ width: 24, height: 24, borderRadius: "50%" }} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : pagedSignals.length === 0 ? (
           <div className="empty-state">No signals match the current filters.</div>
         ) : (
           <div className="signal-table-wrap" style={{ overflowX: "auto" }}>
@@ -722,9 +750,9 @@ export default function App() {
           onSaved={(savedName) => {
             setBuilder(null);
             if (savedName && !builder._id) {
-              setTypeFilter(savedName);
-              setUrgencyFilter("all");
-              setStatusFilter("all");
+              setTypeFilters([savedName]);
+              setUrgencyFilter([]);
+              setStatusFilter([]);
               setPage(0);
             }
             refresh({ fetchRules: true });
