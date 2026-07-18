@@ -182,6 +182,10 @@ function detectCustomRule(months, rule) {
     : ["high", "critical"].includes(rule.severity) ? 9
     : ["medium", "warning"].includes(rule.severity) ? 6.5
     : 5;
+  // Use the rule's explicit severity label if set; otherwise derive from score.
+  const priority = rule.severity
+    ? (["high", "critical"].includes(rule.severity) ? "High" : ["medium", "warning"].includes(rule.severity) ? "Medium" : "Low")
+    : PRIORITY(score);
   const results = [];
 
   // ── Formula path (AI-generated arbitrary expression) ────────────────────
@@ -203,7 +207,7 @@ function detectCustomRule(months, rule) {
         type: rule.name || "Custom rule",
         month: r.date,
         score,
-        priority: PRIORITY(score),
+        priority,
         detail: rule.detail_label || "Formula condition matched",
         reasoning: rule.raw_sentence || rule.formula,
         actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
@@ -246,7 +250,7 @@ function detectCustomRule(months, rule) {
       type: rule.name || "Custom rule",
       month: r.date,
       score,
-      priority: PRIORITY(score),
+      priority,
       detail: `${groups.length} group(s), ${totalConds} condition(s) matched`,
       reasoning: rule.raw_sentence || `Custom rule: ${groups.length} group(s).`,
       actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
