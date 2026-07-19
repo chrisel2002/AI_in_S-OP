@@ -20,6 +20,7 @@ import {
   updateRule,
   deleteRule,
 } from "./store.js";
+import { buildDeterministicRecommendations, getFieldsUsedByRule } from "./recommendations.js";
 
 const PORT = process.env.PORT || 4000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/sop";
@@ -334,13 +335,96 @@ app.patch("/api/dashboard/signals/:id", async (req, res) => {
 });
 
 // --- POST: AI recommendations for one signal row -----------------------
+// app.post("/api/dashboard/signals/:id/ai-recommendations", async (req, res) => {
+//   const { id } = req.params;
+//   if (!mongoose.Types.ObjectId.isValid(id)) {
+//     return res.status(400).json({ error: "Invalid signal ID" });
+//   }
+//   if (!llmEnabled()) {
+//     return res.json({ recommendations: [] });
+//   }
+
+//   try {
+//     const coll = mongoose.connection.db.collection("sales_operations_tool");
+//     const doc = await coll.findOne({ _id: new mongoose.Types.ObjectId(id) });
+//     if (!doc) return res.status(404).json({ error: "Row not found" });
+
+//     // Find the cached signal for this row to provide computed context
+//     const signals = await getCachedSignals();
+//     const sig = signals.find((s) => s._id === id);
+
+//     const editableList = [...ALLOWED_EDITABLE_FIELDS].join(", ");
+//     const raw = await chatLLM(
+//       [
+//         {
+//           role: "system",
+//           content: `You are an S&OP planning assistant. Analyze the given demand-plan signal and return a JSON object with EXACTLY this structure — no preamble, no markdown fences, valid JSON only:
+// {"recommendations":[{"text":"...","changes":null},{"text":"...","changes":{"sales_free_stock_in_tons":5.2}}]}
+
+// Rules:
+// - Include 3 to 5 recommendations.
+// - Some may be text-only observations or action items (set changes to null).
+// - If you suggest changing a numeric planning field, include it in "changes" as a number.
+// - Only use these field names inside "changes": ${editableList}.
+// - Do not invent other field names.
+// - Write each "text" as a natural sentence. Do not include labels like "Field:", "Current:", "Suggested:".
+// - Return ONLY valid JSON, nothing else.`,
+//         },
+//         {
+//           role: "user",
+//           content: `Signal: ${sig?.type || "Unknown"} (score: ${sig?.score ?? "?"}, priority: ${sig?.priority ?? "?"})
+// Material: ${doc.material}, Plant: ${doc.plant}, Sales Office: ${doc.sales_office}, Month: ${String(doc.date).slice(0, 10)}
+// Detail: ${sig?.detail || ""}
+// Reasoning: ${sig?.reasoning || ""}
+
+// Current planning values:
+// - Sales Free Stock: ${doc.sales_free_stock_in_tons}t
+// - Sales Contracts: ${doc.sales_contracts_in_tons}t
+// - Sales Scheduling Agreement: ${doc.sales_scheduling_agreement_in_tons}t
+
+// Historic reference (free stock):
+// - 12M historic sales: ${doc.historic_sales_12_free_stock_in_tons}t
+// - 24M historic sales: ${doc.historic_sales_24_free_stock_in_tons}t
+// - 12M historic inventory: ${doc.historic_inventory_12_free_stock_in_tons}t`,
+//         },
+//       ],
+//       { temperature: 0.5 }
+//     );
+
+//     // Parse — try direct JSON, then try extracting the first {...} block
+//     let parsed = null;
+//     try {
+//       parsed = JSON.parse(raw);
+//     } catch {
+//       const m = raw.match(/\{[\s\S]*\}/);
+//       if (m) {
+//         try { parsed = JSON.parse(m[0]); } catch { /* fall through */ }
+//       }
+//     }
+
+//     if (!parsed || !Array.isArray(parsed.recommendations)) {
+//       return res.json({ recommendations: [] });
+//     }
+
+//     const recommendations = parsed.recommendations
+//       .filter((r) => r && typeof r.text === "string" && r.text.trim())
+//       .map((r) => ({
+//         text: String(r.text).trim().slice(0, 600),
+//         changes: sanitizeChanges(r.changes),
+//       }));
+
+//     res.json({ recommendations });
+//   } catch (e) {
+//     console.error("AI recs error:", e.message);
+//     res.json({ recommendations: [], error: "AI recommendations unavailable" });
+//   }
+// });
+
+
 app.post("/api/dashboard/signals/:id/ai-recommendations", async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: "Invalid signal ID" });
-  }
-  if (!llmEnabled()) {
-    return res.json({ recommendations: [] });
   }
 
   try {
@@ -348,30 +432,79 @@ app.post("/api/dashboard/signals/:id/ai-recommendations", async (req, res) => {
     const doc = await coll.findOne({ _id: new mongoose.Types.ObjectId(id) });
     if (!doc) return res.status(404).json({ error: "Row not found" });
 
-    // Find the cached signal for this row to provide computed context
     const signals = await getCachedSignals();
     const sig = signals.find((s) => s._id === id);
 
-    const editableList = [...ALLOWED_EDITABLE_FIELDS].join(", ");
-    const raw = await chatLLM(
-      [
-        {
-          role: "system",
-          content: `You are an S&OP planning assistant. Analyze the given demand-plan signal and return a JSON object with EXACTLY this structure — no preamble, no markdown fences, valid JSON only:
-{"recommendations":[{"text":"...","changes":null},{"text":"...","changes":{"sales_free_stock_in_tons":5.2}}]}
+    const rules = await getCachedRules();
+    const rule = rules.find((r) => r.name === sig?.type) || null;
 
-Rules:
-- Include 3 to 5 recommendations.
-- Some may be text-only observations or action items (set changes to null).
-- If you suggest changing a numeric planning field, include it in "changes" as a number.
-- Only use these field names inside "changes": ${editableList}.
-- Do not invent other field names.
-- Write each "text" as a natural sentence. Do not include labels like "Field:", "Current:", "Suggested:".
-- Return ONLY valid JSON, nothing else.`,
-        },
-        {
-          role: "user",
-          content: `Signal: ${sig?.type || "Unknown"} (score: ${sig?.score ?? "?"}, priority: ${sig?.priority ?? "?"})
+    // 1. Deterministic, formula-derived recommendations — guaranteed correct,
+    // no LLM involved in computing the number. Empty array for formula rules
+    // or if no rule was found.
+    const deterministicRecs = buildDeterministicRecommendations(rule, doc);
+    const editableFields = rule ? getFieldsUsedByRule(rule) : [];
+
+    // 2. Descriptive-only LLM recommendation — written like a planner talking
+    // to a colleague, not a system reporting statistics. NEVER allowed to
+    // suggest a numeric change — those come only from the deterministic solver.
+    let llmRecs = [];
+    if (llmEnabled()) {
+      const raw = await chatLLM(
+        [
+          {
+            role: "system",
+            content: `You are an experienced S&OP planner explaining a demand-planning risk to a colleague in a meeting. You are NOT a data analyst reciting numbers — you are a person who understands what these numbers mean for the business.
+
+You will be given a flagged material and its data. Return a JSON object with EXACTLY this structure — no preamble, no markdown fences, valid JSON only:
+{"recommendations":[{"text":"..."}]}
+
+HOW MANY RECOMMENDATIONS:
+- Include EXACTLY 1 recommendation, unless the data clearly supports a second, genuinely
+  DIFFERENT angle (e.g. a separate risk, a separate likely cause, or a separate
+  stakeholder to involve). In that case you may include a 2nd.
+- Never include a 2nd or 3rd recommendation that just restates the 1st in different
+  words to sound more thorough. If you only have one real insight, one is correct —
+  do not pad it out.
+
+WRITING STYLE:
+1. Never state a percentage or raw number as the main point of a sentence. Numbers may
+   appear as supporting evidence, but the sentence must lead with the business meaning.
+   BAD:  "Sales rose 335% compared to 12 months ago."
+   GOOD: "This material has seen an unusually large jump in orders — worth checking
+          whether this is a new contract, a one-off bulk order, or a shift in customer
+          behavior, since each implies a different response."
+
+2. Never use the words "average", "deviation", "threshold", "baseline", or "% change" —
+   these are internal system terms, not how a planner talks. Describe what actually
+   happened instead.
+
+3. Write ONE short, natural paragraph (2-3 sentences) that flows together — covering
+   what's happening, why it matters, and one concrete thing to check. Do NOT label these
+   as separate sections ("WHAT happened:", "WHY it matters:", etc.) and do NOT write them
+   as separate bullet-style fragments. Blend them the way a person would say it out loud.
+
+4. Point out something SPECIFIC about this exact material's numbers — not a generic
+   statement that could apply to any flagged signal. Avoid vague filler like "there could
+   be an issue with the sales process" — say what pattern in the data suggests that.
+
+5. Where there's real ambiguity in the cause, name the 2 most likely explanations rather
+   than asserting one as fact — e.g. "this usually means either a stalled customer
+   relationship or a pricing gap — worth checking which." Use "likely", "worth checking
+   whether", "this could mean" — never state a guess as if it were certain.
+
+6. Do not suggest a specific numeric target value under any circumstances — you do not
+   have enough context to know if a number is achievable. Suggest a DIRECTION ("look into
+   reducing new spot orders") not a VALUE ("reduce to 8.2 tons").
+
+7. Historic fields (e.g. "historic_sales_12_...", "historic_inventory_12_...") are single
+   data points from 12 or 24 months ago — NOT rolling averages. Describe them as "the
+   same period last year" or "12 months ago", never as an "average".
+
+Return ONLY valid JSON, nothing else.`,
+          },
+          {
+            role: "user",
+            content: `Signal: ${sig?.type || "Unknown"} (score: ${sig?.score ?? "?"}, priority: ${sig?.priority ?? "?"})
 Material: ${doc.material}, Plant: ${doc.plant}, Sales Office: ${doc.sales_office}, Month: ${String(doc.date).slice(0, 10)}
 Detail: ${sig?.detail || ""}
 Reasoning: ${sig?.reasoning || ""}
@@ -381,41 +514,35 @@ Current planning values:
 - Sales Contracts: ${doc.sales_contracts_in_tons}t
 - Sales Scheduling Agreement: ${doc.sales_scheduling_agreement_in_tons}t
 
-Historic reference (free stock):
-- 12M historic sales: ${doc.historic_sales_12_free_stock_in_tons}t
-- 24M historic sales: ${doc.historic_sales_24_free_stock_in_tons}t
-- 12M historic inventory: ${doc.historic_inventory_12_free_stock_in_tons}t`,
-        },
-      ],
-      { temperature: 0.5 }
-    );
+Historic reference (single points, not averages):
+- 12 months prior — free stock: ${doc.historic_sales_12_free_stock_in_tons}t, contracts: ${doc.historic_sales_12_contracts_in_tons}t, scheduling agreement: ${doc.historic_sales_12_scheduling_agreement_in_tons}t
+- 24 months prior — free stock: ${doc.historic_sales_24_free_stock_in_tons}t, contracts: ${doc.historic_sales_24_contracts_in_tons}t, scheduling agreement: ${doc.historic_sales_24_scheduling_agreement_in_tons}t`,
+          },
+        ],
+        { temperature: 0.6 }
+      );
 
-    // Parse — try direct JSON, then try extracting the first {...} block
-    let parsed = null;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (m) {
-        try { parsed = JSON.parse(m[0]); } catch { /* fall through */ }
+      let parsed = null;
+      try { parsed = JSON.parse(raw); }
+      catch {
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch { /* ignore */ } }
+      }
+
+      if (parsed && Array.isArray(parsed.recommendations)) {
+        llmRecs = parsed.recommendations
+          .filter((r) => r && typeof r.text === "string" && r.text.trim())
+          .map((r) => ({ text: String(r.text).trim().slice(0, 600), changes: null })); // changes forced null — safety net
       }
     }
 
-    if (!parsed || !Array.isArray(parsed.recommendations)) {
-      return res.json({ recommendations: [] });
-    }
-
-    const recommendations = parsed.recommendations
-      .filter((r) => r && typeof r.text === "string" && r.text.trim())
-      .map((r) => ({
-        text: String(r.text).trim().slice(0, 600),
-        changes: sanitizeChanges(r.changes),
-      }));
-
-    res.json({ recommendations });
+    res.json({
+      recommendations: [...deterministicRecs, ...llmRecs],
+      editableFields,
+    });
   } catch (e) {
     console.error("AI recs error:", e.message);
-    res.json({ recommendations: [], error: "AI recommendations unavailable" });
+    res.json({ recommendations: [], editableFields: [], error: "AI recommendations unavailable" });
   }
 });
 

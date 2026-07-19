@@ -10,7 +10,7 @@ function comboKey(r) {
   return `${r.material}|${r.plant}|${r.sales_office}`;
 }
 
-const METRICS = {
+export const METRICS = {
   "sales_free_stock_in_tons":                           "Forecast sales (free stock)",
   "sales_contracts_in_tons":                            "Forecast sales (contracts)",
   "sales_scheduling_agreement_in_tons":                 "Forecast sales (scheduling agreement)",
@@ -29,7 +29,7 @@ const LABEL_TO_COL = Object.fromEntries(
   Object.entries(METRICS).map(([col, label]) => [label, col])
 );
 
-function resolveColumn(val) {
+export function resolveColumn(val) {
   if (!val) return null;
   if (val in LABEL_TO_COL) return LABEL_TO_COL[val]; // old label → fix to key
   return val; // already a column key
@@ -92,7 +92,7 @@ const OPS = {
 };
 
 // Evaluate a single condition against a row. Returns { passes, value } or null if data missing.
-function evalCondition(r, cond) {
+export function evalCondition(r, cond) {
   const baselineCol = resolveColumn(cond.baseline);
   let value = r[cond.metric];
   if (value === undefined || value === null) return null;
