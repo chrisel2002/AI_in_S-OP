@@ -210,6 +210,7 @@ function detectCustomRule(months, rule) {
         priority,
         detail: rule.detail_label || "Formula condition matched",
         reasoning: rule.raw_sentence || rule.formula,
+        description: rule.description || null,
         actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
         snapshot,
       }));
@@ -253,6 +254,7 @@ function detectCustomRule(months, rule) {
       priority,
       detail: `${groups.length} group(s), ${totalConds} condition(s) matched`,
       reasoning: rule.raw_sentence || `Custom rule: ${groups.length} group(s).`,
+      description: rule.description || null,
       actions: "1. Review flagged rows\n2. Confirm with the planner\n3. Take corrective action",
       ...(structured ? { snapshot: { kind: "conditions", logic: structured.logic, conditions: structured.conditions } } : {}),
     }));
