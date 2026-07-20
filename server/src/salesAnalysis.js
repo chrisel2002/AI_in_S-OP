@@ -152,6 +152,32 @@ function enrichWithSignals(materialMetrics, signalsByPair) {
   }
 }
 
+const MIN_FORECAST_TONS = 1; // materiality floor, same convention as MIN_TYPEMIX_TONS
+
+// Computes forecast change directly from sales_operations_tool rows — current
+// total vs. historic-12mo total — independent of any signal/rule type name.
+// This replaces relying on pre-existing signals to judge "did the forecast rise".
+function forecastChangeForPair(rows, material, salesOffice) {
+  let curr = 0, hist = 0;
+  for (const r of rows) {
+    if (Number(r.material) !== material || Number(r.sales_office) !== salesOffice) continue;
+    curr += (r.sales_free_stock_in_tons || 0) + (r.sales_contracts_in_tons || 0) + (r.sales_scheduling_agreement_in_tons || 0);
+    hist += (r.historic_sales_12_free_stock_in_tons || 0) + (r.historic_sales_12_contracts_in_tons || 0) + (r.historic_sales_12_scheduling_agreement_in_tons || 0);
+  }
+  if (curr < MIN_FORECAST_TONS && hist < MIN_FORECAST_TONS) return null; // not material enough to judge
+  if (hist === 0) {
+    return curr >= MIN_FORECAST_TONS ? { changePct: null, isNew: true, isRising: true, isFalling: false, curr, hist } : null;
+  }
+  const changePct = (curr - hist) / hist;
+  return { changePct, isNew: false, isRising: changePct > 0.1, isFalling: changePct < -0.1, curr, hist };
+}
+
+function enrichWithForecastChange(materialMetrics, rows) {
+  for (const m of materialMetrics) {
+    m.forecastChange = forecastChangeForPair(rows, m.material, m.salesOffice);
+  }
+}
+
 // ---- candidate material/sales_office selection ---------------------------
 
 function extractMentionedMaterials(question, knownMaterials) {
@@ -168,28 +194,39 @@ function risingSignalsFirst(signals) {
 }
 
 // Returns exact {material, salesOffice} pairs — never re-expands a signal's
-// material to other offices of that material. That re-expansion was the
-// root cause of "concentration found but no matching forecast increase":
-// the candidate pool used to include every office of a material, not just
-// the office where the qualifying signal actually fired.
+// material to other offices of that material.
+//
+// Priority order:
+//   1. Materials the user explicitly mentioned by number — always included,
+//      regardless of signals.
+//   2. Otherwise, scan ALL known material+sales_office combinations in the
+//      dataset (not just ones tied to an existing signal) — ranked by total
+//      recent-relevant volume so the most substantial pairs are checked
+//      first. This avoids silently skipping a material just because it
+//      never happened to trip a business rule.
+//   3. Signals are still used, but only as a TIE-BREAKER / priority boost —
+//      a pair linked to an existing signal is ranked slightly higher when
+//      volumes are close, since it's more likely to be relevant to the
+//      question — never as a hard filter that excludes everything else.
 function pickCandidatePairs(question, rows, signals, intent) {
   const officesByMaterial = new Map();
-  const totalsByMaterial = new Map();
+  const totalsByPair = new Map(); // key: "material|office" -> forecast tons
   const knownMaterials = new Set();
+
   for (const r of rows) {
     const material = Number(r.material);
     const office = Number(r.sales_office);
     knownMaterials.add(material);
     if (!officesByMaterial.has(material)) officesByMaterial.set(material, new Set());
     officesByMaterial.get(material).add(office);
-    totalsByMaterial.set(material, (totalsByMaterial.get(material) || 0) + (r.sales_free_stock_in_tons || 0));
+    const key = pairKey(material, office);
+    const f = r.sales_free_stock_in_tons || 0;
+    totalsByPair.set(key, (totalsByPair.get(key) || 0) + f);
   }
 
+  // 1. Explicit mentions always win, regardless of signals or volume.
   const mentioned = extractMentionedMaterials(question, knownMaterials);
   if (mentioned.length) {
-    // User named specific materials but not an office — cover its known
-    // offices (bounded). Per-pair signal lookup still applies downstream, so
-    // an office with no corroborating signal will be labelled as such.
     const pairs = [];
     for (const material of mentioned.slice(0, MAX_CANDIDATE_MATERIALS)) {
       for (const salesOffice of [...(officesByMaterial.get(material) || [])].slice(0, MAX_OFFICES_PER_MATERIAL)) {
@@ -199,33 +236,39 @@ function pickCandidatePairs(question, rows, signals, intent) {
     return pairs.slice(0, MAX_CANDIDATE_PAIRS);
   }
 
-  if (signals?.length) {
-    const source = intent.forecastDriver || intent.geographic ? risingSignalsFirst(signals) : signals;
-    const seen = new Set();
-    const pairs = [];
-    for (const s of source) {
-      const material = Number(s.material);
-      const salesOffice = Number(s.salesOffice);
-      const key = pairKey(material, salesOffice);
-      if (!seen.has(key)) {
-        seen.add(key);
-        pairs.push({ material, salesOffice });
-      }
-      if (pairs.length >= MAX_CANDIDATE_PAIRS) break;
-    }
-    if (pairs.length) return pairs;
-  }
+  // 2. Build a signal-boost lookup — pairs tied to a signal get ranked up,
+  // but this no longer excludes pairs with no signal at all.
+  const signalPairKeys = new Set(
+    (signals || []).map((s) => pairKey(Number(s.material), Number(s.salesOffice)))
+  );
+  // For forecast-driver / geographic questions, further boost pairs whose
+  // signal specifically indicates a rise — same intent as before, just no
+  // longer a hard requirement.
+  const risingPairKeys = new Set(
+    (intent.forecastDriver || intent.geographic ? risingSignalsFirst(signals || []) : [])
+      .map((s) => pairKey(Number(s.material), Number(s.salesOffice)))
+  );
 
-  // Fallback: no signals at all — top materials by forecast volume, their
-  // known offices (bounded).
-  const topMaterials = [...totalsByMaterial.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_CANDIDATE_MATERIALS).map(([m]) => m);
+  // 3. Rank ALL known material+office pairs by volume, boosted if linked to
+  // a signal (and further boosted if linked to a rising signal when relevant).
+  const ranked = [...totalsByPair.entries()]
+    .map(([key, tons]) => {
+      let score = tons;
+      if (signalPairKeys.has(key)) score *= 3; // boost, not a filter
+      if (risingPairKeys.has(key)) score *= 2; // extra boost for rising-signal relevance
+      return { key, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
   const pairs = [];
-  for (const material of topMaterials) {
-    for (const salesOffice of [...(officesByMaterial.get(material) || [])].slice(0, MAX_OFFICES_PER_MATERIAL)) {
-      pairs.push({ material, salesOffice });
-    }
+  for (const { key } of ranked) {
+    const sep = key.lastIndexOf("|");
+    const material = Number(key.slice(0, sep));
+    const salesOffice = Number(key.slice(sep + 1));
+    pairs.push({ material, salesOffice });
+    if (pairs.length >= MAX_CANDIDATE_PAIRS) break;
   }
-  return pairs.slice(0, MAX_CANDIDATE_PAIRS);
+  return pairs;
 }
 
 // ---- period bounds (cached — underlying_sales is static during runtime) --
@@ -403,13 +446,14 @@ function rankAndRender(materialMetrics, metricFn, renderFn, header) {
 
 function renderConcentration(m, r) {
   const base = `  - material ${m.material}, sales office ${m.salesOffice}: recent demand ${t(m.totals.recent)}${r.lowVolume ? " (low-volume)" : ""}; top customer ${r.topCustomer} = ${pct(r.topCustomerShare)} of it; top 3 customers = ${pct(r.top3Share)}.`;
+  const fc = m.forecastChange;
   let tail;
-  if (m.sameOfficeShiftSignal) {
-    tail = ` CONFIRMED: this same material and sales office also has a ${m.sameOfficeShiftSignal.type} signal (${m.sameOfficeShiftSignal.detail}) — concentration and demand shift match at the same sales office.`;
-  } else if (m.otherOfficeShift) {
-    tail = ` No demand-shift signal at sales office ${m.salesOffice} for this material — a ${m.otherOfficeShift.signal.type} signal exists for material ${m.material} but at a different sales office (${m.otherOfficeShift.office}), so this is a material-level indication only, not a confirmed combined finding.`;
+  if (fc?.isRising) {
+    tail = ` CONFIRMED: this same material and sales office also shows a forecast increase (+${(fc.changePct * 100).toFixed(0)}% vs 12 months ago) — concentration and demand shift match at the same sales office.`;
+  } else if (fc?.isFalling) {
+    tail = ` CONFIRMED: this same material and sales office also shows a forecast decline (${(fc.changePct * 100).toFixed(0)}% vs 12 months ago) — concentration and demand shift match at the same sales office.`;
   } else {
-    tail = " No corroborating demand-shift signal found for this material/sales office.";
+    tail = " No corroborating forecast shift found for this material/sales office in the current planning data.";
   }
   return base + tail;
 }
@@ -442,10 +486,11 @@ function lowCoverageCaveat(m, signal) {
 // must stay hedged ("appears associated with"/"may be customer-driven"),
 // never "confirmed", regardless of how strong the concentration share looks.
 function renderConcentrationForDriver(m, r) {
-  const s = m.sameOfficeRisingSignal;
-  const base = `  - material ${m.material}, sales office ${m.salesOffice}: forecast increase detected (${s.type}: ${s.detail}); top customer ${r.topCustomer} = ${pct(r.topCustomerShare)} of recent underlying-order demand (${t(m.totals.recent)}${r.lowVolume ? ", low-volume" : ""}); top 3 customers = ${pct(r.top3Share)}.`;
+  const fc = m.forecastChange;
+  const changeTxt = fc.isNew ? "new demand (no forecast 12 months ago)" : `+${(fc.changePct * 100).toFixed(0)}% vs 12 months ago`;
+  const base = `  - material ${m.material}, sales office ${m.salesOffice}: forecast increase detected (${changeTxt}); top customer ${r.topCustomer} = ${pct(r.topCustomerShare)} of recent underlying-order demand (${t(m.totals.recent)}${r.lowVolume ? ", low-volume" : ""}); top 3 customers = ${pct(r.top3Share)}.`;
   const caveat = " This is an indication, not proof, that customer concentration drove the increase — the backend measures each customer's share of recent order volume, not their specific contribution to the size of the increase itself. Describe the link as 'appears to be' or 'may be' customer-driven, not confirmed.";
-  return base + caveat + lowCoverageCaveat(m, s);
+  return base + caveat;
 }
 
 function renderNewCustomers(m, r) {
@@ -459,7 +504,7 @@ function renderLostCustomers(m, r) {
   const severity = r.lowVolume
     ? "minor, low-volume dormant customer(s) — not a major loss given the small historical volume"
     : "previously significant customer(s) with ~no recent demand";
-  return `  - material ${m.material}, sales office ${m.salesOffice}: ${severity}: ${names}.`;
+  return `  - material ${m.material}, sales office ${m.salesOffice} (current recent demand: ${t(m.totals.recent)}): ${severity}: ${names}.`;
 }
 
 function renderGeographic(m, r) {
@@ -467,9 +512,10 @@ function renderGeographic(m, r) {
     .filter((s) => s.delta > 0)
     .map((s) => `${s.country}${s.isNew ? " (new)" : ""} now ${pct(s.recentShare)} of recent demand (${t(s.recentTons)}${s.lowVolume ? ", low-volume" : ""})`)
     .join(", ");
-  const causal = m.sameOfficeRisingSignal
-    ? ` This material/sales office also has a forecast increase (${m.sameOfficeRisingSignal.type}: ${m.sameOfficeRisingSignal.detail}) — the geographic shift appears likely associated with it, though this is an indication rather than proof of causation (the backend only measures where recent demand sits geographically, not its specific contribution to the increase).${lowCoverageCaveat(m, m.sameOfficeRisingSignal)}`
-    : " I cannot confirm this geographic movement caused a forecast increase for this material/sales office — no matching forecast-increase signal at the same sales office.";
+  const fc = m.forecastChange;
+  const causal = fc?.isRising
+    ? ` This material/sales office also shows a forecast increase (${fc.isNew ? "new demand, no forecast 12 months ago" : `+${(fc.changePct * 100).toFixed(0)}% vs 12 months ago`}) — the geographic shift appears likely associated with it, though this is an indication rather than proof of causation.`
+    : " I cannot confirm this geographic movement caused a forecast increase for this material/sales office — the planning data does not show a matching forecast increase at the same sales office.";
   return `  - material ${m.material}, sales office ${m.salesOffice}: growing/new regions — ${parts}.${causal}`;
 }
 
@@ -565,7 +611,7 @@ export async function buildSalesAnalysisContext(question, { rows, signals }) {
 
       if (groupRows?.length) {
         const materialMetrics = foldByMaterial(groupRows);
-        enrichWithSignals(materialMetrics, indexSignalsByPair(signals));
+        enrichWithForecastChange(materialMetrics, rows);
 
         const fmt = (d) => d.toISOString().slice(0, 10);
         sections.push(
@@ -574,7 +620,7 @@ export async function buildSalesAnalysisContext(question, { rows, signals }) {
 
         if (intent.concentration) {
           if (intent.forecastDriver) {
-            const withRisingSignal = materialMetrics.filter((m) => m.sameOfficeRisingSignal);
+            const withRisingSignal = materialMetrics.filter((m) => m.forecastChange?.isRising);
             const rendered = rankAndRender(withRisingSignal, concentrationMetric, renderConcentrationForDriver, "FORECAST INCREASE — CUSTOMER CONCENTRATION");
             sections.push(
               rendered ||
