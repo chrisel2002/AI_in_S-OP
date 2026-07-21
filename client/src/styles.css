@@ -675,6 +675,7 @@ td:first-child { padding-left: 16px; }
   display: flex;
   border-top: 2px solid var(--tk-blue);
   background: var(--surface);
+  white-space: normal;
 }
 .sig-detail-why {
   flex: 1;

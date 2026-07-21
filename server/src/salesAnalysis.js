@@ -62,7 +62,8 @@ const PATTERNS = {
     /explains? the (increase|growth)/i,
   ],
   newCustomers: [/new customers?/i],
-  lostCustomers: [/lost customers?/i, /no longer contribut/i, /churn/i, /stopped (ordering|buying|purchasing)/i, /important customers/i],
+  lostCustomers: [/lost customers?/i, /no longer contribut/i, /churn/i, /stopped (ordering|buying|purchasing)/i],
+  retainedCustomers: [/still contribut/i, /still (ordering|buying|active)/i, /historically.{0,15}(important|significant)/i, /compare.{0,30}(past|present|historical)/i, /past.{0,20}present/i, /important customers/i],
   typeMix: [/free.?stock/i, /scheduling agreement/i, /\bcontracts?\b/i, /demand type/i, /demand mix/i, /composition/i, /mix between/i],
   geographic: [/geographic/i, /\bcountr(y|ies)\b/i, /postal code/i, /\bregion/i, /shifted? geographically/i],
   customerGeneral: [/\bcustomers?\b/i, /\border(s)?\b/i, /sales order/i],
@@ -79,6 +80,7 @@ export function detectSalesAnalysisIntent(question) {
     forecastDriver: matchesAny(q, PATTERNS.forecastDriver),
     newCustomers: matchesAny(q, PATTERNS.newCustomers),
     lostCustomers: matchesAny(q, PATTERNS.lostCustomers),
+    retainedCustomers: matchesAny(q, PATTERNS.retainedCustomers),
     typeMix: matchesAny(q, PATTERNS.typeMix),
     geographic: matchesAny(q, PATTERNS.geographic),
   };
@@ -409,6 +411,35 @@ function lostCustomersMetric(m) {
   return { candidates, lowVolume: totalLostTons < LOW_VOLUME_TONS, strength };
 }
 
+function retainedCustomersMetric(m) {
+  if (m.totals.historical <= 0 || m.totals.recent <= 0) return null;
+  const recent = m.byCustomer.recent;
+  const retained = [...m.byCustomer.historical.entries()]
+    .filter(([c, histTons]) => histTons / m.totals.historical >= 0.05 && (recent.get(c) || 0) > 0)
+    .map(([customer, histTons]) => {
+      const recentTons = recent.get(customer);
+      return { customer, histTons, recentTons, histShare: histTons / m.totals.historical, recentShare: recentTons / m.totals.recent, lowVolume: histTons < LOW_VOLUME_TONS };
+    })
+    .sort((a, b) => b.histTons - a.histTons)
+    .slice(0, MAX_LISTED);
+  if (!retained.length) return null;
+  const totalRetainedHist = retained.reduce((s, c) => s + c.histTons, 0);
+  const strength = (totalRetainedHist / m.totals.historical) * Math.min(1, totalRetainedHist / LOW_VOLUME_TONS);
+  return { retained, strength };
+}
+
+function renderRetainedCustomers(m, r) {
+  const names = r.retained.map((c) =>
+    `${c.customer}: historical ${t(c.histTons)} (${pct(c.histShare)}) → recent ${t(c.recentTons)} (${pct(c.recentShare)})${c.lowVolume ? " [low-volume]" : ""}`
+  ).join("; ");
+  const totalHist = m.totals.historical;
+  const totalRecent = m.totals.recent;
+  const volChange = totalHist > 0 ? ((totalRecent - totalHist) / totalHist * 100).toFixed(0) : null;
+  const volTrend = volChange !== null ? ` Total volume: historical ${t(totalHist)} → recent ${t(totalRecent)} (${volChange >= 0 ? "+" : ""}${volChange}%).` : "";
+  const lowVolCaveat = totalRecent < MIN_GEO_TONS ? " LOW-VOLUME: total recent demand is very small — treat share figures as low-confidence." : "";
+  return `  - material ${m.material}, sales office ${m.salesOffice}:${volTrend} Retained historically important customers — ${names}.${lowVolCaveat}`;
+}
+
 function geographicMetric(m) {
   if (m.totals.recent <= 0) return null;
   const recentTop = topEntries(m.byCountry.recent, MAX_LISTED);
@@ -507,16 +538,25 @@ function renderLostCustomers(m, r) {
   return `  - material ${m.material}, sales office ${m.salesOffice} (current recent demand: ${t(m.totals.recent)}): ${severity}: ${names}.`;
 }
 
+// Minimum meaningful total volume for a geographic finding to be actionable.
+// At ThyssenKrupp planning scale (tens–hundreds of tons/month), sub-0.1t totals
+// are operationally negligible and must be called out explicitly.
+const MIN_GEO_TONS = 0.1;
+
 function renderGeographic(m, r) {
+  const totalLowVolume = m.totals.recent < MIN_GEO_TONS;
+  const volCaveat = totalLowVolume
+    ? ` LOW-VOLUME WARNING: total recent underlying-order demand for this pair is only ${t(m.totals.recent)} — this geographic shift is technically real but operationally negligible at this scale. Do not present this as a significant or actionable finding.`
+    : "";
   const parts = r.shifts
     .filter((s) => s.delta > 0)
     .map((s) => `${s.country}${s.isNew ? " (new)" : ""} now ${pct(s.recentShare)} of recent demand (${t(s.recentTons)}${s.lowVolume ? ", low-volume" : ""})`)
     .join(", ");
   const fc = m.forecastChange;
   const causal = fc?.isRising
-    ? ` This material/sales office also shows a forecast increase (${fc.isNew ? "new demand, no forecast 12 months ago" : `+${(fc.changePct * 100).toFixed(0)}% vs 12 months ago`}) — the geographic shift appears likely associated with it, though this is an indication rather than proof of causation.`
-    : " I cannot confirm this geographic movement caused a forecast increase for this material/sales office — the planning data does not show a matching forecast increase at the same sales office.";
-  return `  - material ${m.material}, sales office ${m.salesOffice}: growing/new regions — ${parts}.${causal}`;
+    ? ` Planning data also shows a forecast increase (${fc.isNew ? "new demand, no forecast 12 months ago" : `+${(fc.changePct * 100).toFixed(0)}% vs 12 months ago`}) for this material/sales office — but the two data sources are independent and this is an indication only, not proof that the geographic shift caused the forecast increase.`
+    : " Planning data does not show a matching forecast increase at this material/sales office — the geographic shift stands alone and may not be material to the forecast.";
+  return `  - material ${m.material}, sales office ${m.salesOffice}: growing/new regions — ${parts}.${causal}${volCaveat}`;
 }
 
 // ---- demand-type mix: computed directly from sales_operations_tool rows ---
@@ -583,75 +623,63 @@ function renderTypeMixSection(rows) {
 }
 
 // ---- public entry point -----------------------------------------------------
+// Always computes every available section and passes the full picture to the
+// LLM. No intent detection gating — the model decides which parts are relevant
+// to the question. The Mongo aggregation cost is the same regardless of which
+// sections end up being used in the answer.
 
 export async function buildSalesAnalysisContext(question, { rows, signals }) {
-  const intent = detectSalesAnalysisIntent(question);
-  if (!intent.any) return null;
+  if (storageBackend() !== "mongo") return null;
 
-  const sections = [];
+  const pairs = pickCandidatePairs(question, rows, signals, {});
+  if (!pairs.length) return null;
 
-  // Demand-type mix is entirely in-memory (sales_operations_tool) — no Mongo,
-  // no dependency on dashboard signals, always answerable.
-  if (intent.typeMix) {
-    sections.push(renderTypeMixSection(rows));
+  // Demand-type mix is purely in-memory — compute it unconditionally.
+  const typeMixSection = renderTypeMixSection(rows);
+
+  let bounds, groupRows;
+  try {
+    bounds = await getPeriodBounds();
+    groupRows = await fetchGroupedDemand(pairs, bounds);
+  } catch (e) {
+    console.log("sales analysis query failed:", e.message);
+    // Return at least the type-mix section so the LLM isn't completely blind.
+    return typeMixSection;
   }
 
-  const needsUnderlyingSales = intent.concentration || intent.newCustomers || intent.lostCustomers || intent.geographic;
-  if (needsUnderlyingSales && storageBackend() === "mongo") {
-    const pairs = pickCandidatePairs(question, rows, signals, intent);
-    if (pairs.length) {
-      let bounds, groupRows;
-      try {
-        bounds = await getPeriodBounds();
-        groupRows = await fetchGroupedDemand(pairs, bounds);
-      } catch (e) {
-        console.log("sales analysis query failed:", e.message);
-        groupRows = null;
-      }
+  if (!groupRows?.length) return typeMixSection;
 
-      if (groupRows?.length) {
-        const materialMetrics = foldByMaterial(groupRows);
-        enrichWithForecastChange(materialMetrics, rows);
+  const materialMetrics = foldByMaterial(groupRows);
+  enrichWithForecastChange(materialMetrics, rows);
 
-        const fmt = (d) => d.toISOString().slice(0, 10);
-        sections.push(
-          `Recent period: ${fmt(bounds.recentStart)} to ${fmt(bounds.maxDate)}. Historical comparison period: ${fmt(bounds.historicalStart)} to ${fmt(bounds.recentStart)}. Source: underlying_sales order-level records, scoped to ${pairs.length} material/sales-office pair(s) relevant to this question.`
-        );
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const sections = [
+    `Recent period: ${fmt(bounds.recentStart)} to ${fmt(bounds.maxDate)}. Historical comparison period: ${fmt(bounds.historicalStart)} to ${fmt(bounds.recentStart)}. Source: underlying_sales order-level records, scoped to ${pairs.length} material/sales-office pair(s) with the highest planning volume.`,
+    typeMixSection,
+  ];
 
-        if (intent.concentration) {
-          if (intent.forecastDriver) {
-            const withRisingSignal = materialMetrics.filter((m) => m.forecastChange?.isRising);
-            const rendered = rankAndRender(withRisingSignal, concentrationMetric, renderConcentrationForDriver, "FORECAST INCREASE — CUSTOMER CONCENTRATION");
-            sections.push(
-              rendered ||
-                "FORECAST INCREASE — CUSTOMER CONCENTRATION:\nI found forecast increases, but I do not have enough matching customer-level evidence to confirm that they are driven by a single customer or small customer group."
-            );
-          } else {
-            sections.push(
-              rankAndRender(
-                materialMetrics, concentrationMetric, renderConcentration,
-                "CUSTOMER CONCENTRATION (a large share of recent demand comes from one or a few customers)"
-              )
-            );
-          }
-        }
-        if (intent.newCustomers) {
-          sections.push(rankAndRender(materialMetrics, newCustomersMetric, renderNewCustomers, "NEW CUSTOMERS (recent vs. historical period)"));
-        }
-        if (intent.lostCustomers) {
-          sections.push(rankAndRender(materialMetrics, lostCustomersMetric, renderLostCustomers, "LOST / DORMANT HISTORICAL CUSTOMERS"));
-        }
-        if (intent.geographic) {
-          const rendered = rankAndRender(materialMetrics, geographicMetric, renderGeographic, "GEOGRAPHIC DEMAND SHIFT (by recipient country)");
-          sections.push(
-            rendered ||
-              "GEOGRAPHIC DEMAND SHIFT: I did not find a material/sales-office pair with a significant geographic shift in the current scope of this question."
-          );
-        }
-      }
-    }
+  // All available analytical lenses — always computed; the LLM picks what's useful.
+  const withRisingForecast = materialMetrics.filter((m) => m.forecastChange?.isRising);
+
+  const concentration = rankAndRender(materialMetrics, concentrationMetric, renderConcentration, "CUSTOMER CONCENTRATION (large share of recent demand from one or few customers)");
+  if (concentration) sections.push(concentration);
+
+  if (withRisingForecast.length) {
+    const driver = rankAndRender(withRisingForecast, concentrationMetric, renderConcentrationForDriver, "FORECAST INCREASE — CUSTOMER CONCENTRATION (for pairs where forecast is rising)");
+    if (driver) sections.push(driver);
   }
 
-  const rendered = sections.filter(Boolean);
-  return rendered.length ? rendered.join("\n\n") : null;
+  const retained = rankAndRender(materialMetrics, retainedCustomersMetric, renderRetainedCustomers, "HISTORICALLY IMPORTANT CUSTOMERS STILL CONTRIBUTING (past vs. present)");
+  if (retained) sections.push(retained);
+
+  const newCust = rankAndRender(materialMetrics, newCustomersMetric, renderNewCustomers, "NEW CUSTOMERS (appeared in recent period, absent historically)");
+  if (newCust) sections.push(newCust);
+
+  const lost = rankAndRender(materialMetrics, lostCustomersMetric, renderLostCustomers, "LOST / DORMANT HISTORICAL CUSTOMERS (significant historical demand, zero recent demand)");
+  if (lost) sections.push(lost);
+
+  const geo = rankAndRender(materialMetrics, geographicMetric, renderGeographic, "GEOGRAPHIC DEMAND SHIFT (by recipient country)");
+  if (geo) sections.push(geo);
+
+  return sections.filter(Boolean).join("\n\n");
 }
