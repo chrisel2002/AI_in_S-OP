@@ -1,7 +1,11 @@
-// "Ask the assistant" — answers questions grounded ONLY in a compact context
-// bundle built from the live data (signals, KPIs, aggregates). Keeps the model
-// from hallucinating: if it's not in the context, it should say so.
-import { chatLLM, llmEnabled } from "./llm.js";
+// Agentic chat: the LLM can call query_database() as many times as it needs
+// (up to MAX_ITERATIONS) before producing a final answer. This lets it answer
+// any data question without pre-coded intent detection.
+import { chatLLM, chatLLMWithTools, llmEnabled } from "./llm.js";
+import { runQuery, QUERY_TOOL } from "./queryTool.js";
+
+const MAX_ITERATIONS = 5;   // max tool-call rounds before forcing a final answer
+const MAX_TOOL_RESULT_CHARS = 6000; // truncate large results before feeding back
 
 const topN = (map, n) => Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n);
 
@@ -18,7 +22,6 @@ export function buildChatContext(rows, signals, rules) {
     byMaterial[r.material] = (byMaterial[r.material] || 0) + f;
     byPlant[r.plant] = (byPlant[r.plant] || 0) + f;
   }
-  // group signals by type so EVERY type has concrete examples in the context
   const byTypeSignals = {};
   for (const s of signals) (byTypeSignals[s.type] ||= []).push(s);
 
@@ -44,50 +47,88 @@ export function buildChatContext(rows, signals, rules) {
   return lines.join("\n");
 }
 
+function buildSystemPrompt(context, salesAnalysis) {
+  return `You are an analyst assistant for a Sales & Operations Planning (S&OP) dashboard at ThyssenKrupp.
+
+You have access to a query_database tool that runs MongoDB aggregation pipelines against the live database. Use it freely whenever you need specific numbers, trends, rankings, or comparisons that aren't already in the context below. You can call it multiple times in sequence — e.g. run a broad query first, see the results, then refine.
+
+TOOL USAGE GUIDELINES:
+- Always prefer $group + $sum / $avg / $count over returning raw rows.
+- Add { $sort: { <field>: -1 } }, { $limit: N } to get top-N results.
+- Dates in underlying_sales are ISODate objects — use ISO strings in comparisons: { $gte: new Date("2025-01-01") }.
+- If a query returns cappedAt: 100, your grouping isn't specific enough — add more $group keys or narrow the $match.
+- If a query errors, try a simpler version or a different approach and explain what you tried.
+- Never fabricate numbers — only cite figures that came from the pre-computed context or from tool results you actually received.
+
+ANSWER FORMAT:
+- Use markdown. Tables for comparable data, bold for key numbers.
+- Cite the actual material/plant/sales-office/customer IDs from results — never generic examples.
+- If the data genuinely can't answer the question, say so clearly.
+
+DATA CONTEXT (pre-computed summary — always available):
+${context}
+${salesAnalysis ? `\nSALES ANALYSIS (pre-computed from order-level + planning data):\n${salesAnalysis}` : ""}`;
+}
+
 export async function answerQuestion(question, context, history = [], salesAnalysis = null) {
   if (!llmEnabled()) return "The AI assistant is currently disabled (no API key configured).";
 
-  const salesInstructions = salesAnalysis
-    ? " A SALES ANALYSIS section is provided below, computed directly by the backend from order-level records (underlying_sales) and planning data (sales_operations_tool). Use it to answer any question the data supports — you do not need to restrict yourself to specific question types. Only use the customers, countries, quantities, shares, materials and sales offices that literally appear in it; never invent or extrapolate beyond the numbers given. Never combine findings from two different rows into a single confirmed story unless they share the exact same material AND sales office. " +
-      "Confidence language rules: use 'CONFIRMED' or strong language only when the section text says so at the exact same material+sales office. Use 'appears to be', 'may indicate', 'likely associated' for causal claims about forecast increases (the backend measures order-share, not causal contribution to the increase). For 'low-volume' findings, use softer language ('a small amount of data suggests…') regardless of how large the percentage looks. When a row is marked as a limitation or caveat, repeat it faithfully — do not drop it. " +
-      "Matching note: data is joined by material + sales office + period + sales type; plant was not used. State this when relevant. " +
-      "For LOST/DORMANT CUSTOMERS: these have zero recent demand by definition — never add a 'recent tons' or 'recent share' column. For RETAINED CUSTOMERS: show both historical and recent figures as provided. " +
-      "If the SALES ANALYSIS does not contain data that would answer the user's question, say so plainly rather than guessing."
-    : "";
-  const salesBlock = salesAnalysis ? `\n\nSALES ANALYSIS (backend-calculated):\n${salesAnalysis}` : "";
-
+  const systemPrompt = buildSystemPrompt(context, salesAnalysis);
   const messages = [
-    {
-      role: "system",
-      content:
-        "You are an analyst assistant for a Sales & Operations Planning (S&OP) dashboard. " +
-        "Every answer MUST be specific to the DATA CONTEXT below — cite the actual signal types, material numbers, plant numbers, months and figures from it. Do NOT invent materials, plants, or numbers that aren't present, and do NOT give generic textbook advice that isn't tied to a specific signal in the context. " +
-        "When asked what to do or for suggestions, recommend concrete S&OP actions, but anchor each one to a specific signal or material/plant from the context (e.g. 'validate the +2357% surge on material 11681 at plant 28 with sales'). Match the recommendation to the signal TYPE: stockout-risk questions must use the Stockout risk signals listed, demand questions the Demand surge/drop signals, etc. — do not mix types. " +
-        "Never give a generic follow-up like 'check demand and validate with sales' — name the specific customer, material, and sales office involved (e.g. 'validate whether customer 2102231's recent demand for material 11696 in sales office 76 is recurring or a one-time order'). Use cautious language ('appears to', 'may indicate', 'cannot confirm', 'material-level indication only') unless the evidence is a confirmed same material+sales-office match with meaningful volume — only then use stronger language. " +
-        "If a detail the user asks about isn't in the context, say you don't have it in the current view. Keep answers focused. " +
-        "FORMAT: Use markdown in your responses. When listing multiple items with comparable fields (materials, signals, customers, etc.), use a markdown table with clear column headers — this is strongly preferred over bullet lists for tabular data. Use **bold** for key numbers, material IDs, and important terms. Use bullet lists only for non-tabular action items or short enumerations. Keep responses concise and scannable. " +
-        "If the SALES ANALYSIS text notes that the underlying-order volume is small relative to the signal's forecast volume, repeat that limitation/low-volume caveat rather than dropping it. " +
-        "When a row is marked 'low-volume', its percentage or share figures must be treated as the LEAST confident evidence in your answer, regardless of how large the percentage looks — use softer language for it (e.g. 'a small amount of data suggests...', 'not a reliable pattern given the volume') even if a non-low-volume row in the same table uses stronger language like 'appears to be' or 'likely'. Never let a low-volume finding sound more confident than a non-low-volume finding in the same answer. " +
-        "When rendering a LOST/DORMANT CUSTOMERS table, these customers have ZERO recent demand by definition — never invent or show a 'Recent Share' or 'Recent tons' column for them, since that value does not exist and would be misleading. Valid columns for that section are only: Customer ID, Historical Tons, Historical Share (% of historical demand), and a low-volume flag if present. Do not restructure any SALES ANALYSIS section into a table with columns that weren't part of the original computed data — only use the exact fields the backend actually provided. " +
-        "If the user asks HOW a finding in the SALES ANALYSIS section was determined (e.g. 'how do you know this', 'how was this calculated', 'what data shows this'), explain the REAL methodology: the backend directly queries actual order-level records for the relevant time period and checks whether that specific customer/material/country has matching orders. A 'lost customer' finding specifically means the query returned zero matching orders for that customer in the recent period — this is a direct database check, not an inference from signals, rules, or forecasts. This same rule applies to ANY SALES ANALYSIS finding, not only lost customers: if asked how a concentration, new-customer, geographic, or forecast-change figure was determined, explain that it comes from direct calculation over order-level (underlying_sales) or planning (sales_operations_tool) records — never attribute any SALES ANALYSIS finding to 'signals' or 'rules', since those are a separate system. If you are unsure of the exact methodology behind something, say so plainly rather than inventing a plausible-sounding explanation. " +
-        " If the user asks about the exact date range used ('which time period', 'what dates', 'how do you define recent vs historical'), look for the 'Recent period: ... Historical comparison period: ...' line included in the SALES ANALYSIS section — it states the exact dates and the fixed window lengths (3 months recent, 12 months historical comparison). State this directly rather than saying the information is unavailable, since it is always included whenever a SALES ANALYSIS section is present." +
-        " This 'not an inference from signals/rules' clarification is for YOUR OWN reasoning only — only say it explicitly to the user if they specifically ask HOW something was determined or  where the data came from. In a normal answer that isn't questioning your methodology, just state the finding plainly without this caveat." +
-        salesInstructions +
-        "\n\nDATA CONTEXT:\n" + context + salesBlock,
-    },
+    { role: "system", content: systemPrompt },
     ...history.slice(-6),
     { role: "user", content: question },
   ];
-  try {
-    const answer = (await chatLLM(messages, { temperature: 0.3 })) || "I couldn't generate an answer.";
-    // Don't rely on the model to remember the matching disclosure every time —
-    // append it deterministically whenever the sales analysis was actually used.
-    if (salesAnalysis && !/sales office/i.test(answer)) {
-      return `${answer}\n\n(This analysis matched by material, sales office, period, and sales type — plant was not used, since plant mapping differs between the planning and order-level collections.)`;
+
+  // Agentic loop — keep going while the model wants to call tools.
+  const thread = [...messages];
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    let response;
+    try {
+      response = await chatLLMWithTools(thread, [QUERY_TOOL]);
+    } catch (e) {
+      console.log("chatLLMWithTools failed:", e.message);
+      // Fall back to plain completion without tools.
+      try {
+        return (await chatLLM(thread)) || "Sorry, the assistant is unavailable right now.";
+      } catch {
+        return "Sorry, the assistant is unavailable right now.";
+      }
     }
-    return answer;
-  } catch (e) {
-    console.log("chat LLM failed:", e.message);
-    return "Sorry, the assistant is unavailable right now.";
+
+    // Model is done — return the final text.
+    if (response.finish_reason !== "tool_calls" || !response.tool_calls.length) {
+      return response.content || "I couldn't generate an answer.";
+    }
+
+    // Append the assistant message (with tool_calls) to the thread.
+    thread.push(response.message);
+
+    // Execute each tool call and append results.
+    for (const toolCall of response.tool_calls) {
+      let resultText;
+      try {
+        const args = JSON.parse(toolCall.function.arguments || "{}");
+        const result = await runQuery(args.collection, args.pipeline);
+        resultText = JSON.stringify(result, null, 2);
+        if (resultText.length > MAX_TOOL_RESULT_CHARS) {
+          resultText = resultText.slice(0, MAX_TOOL_RESULT_CHARS) +
+            "\n... (truncated — results exceeded limit; refine your aggregation to reduce output)";
+        }
+      } catch (err) {
+        resultText = JSON.stringify({ error: err.message, hint: "Check collection name, pipeline syntax, and field names." });
+      }
+      thread.push({ role: "tool", tool_call_id: toolCall.id, content: resultText });
+      console.log(`[chat tool] query_database → ${resultText.slice(0, 120).replace(/\n/g, " ")}…`);
+    }
+  }
+
+  // Hit iteration cap — ask for a final summary without tools.
+  thread.push({ role: "user", content: "Please summarise your findings so far and give a final answer." });
+  try {
+    return (await chatLLM(thread)) || "I couldn't generate a final answer after multiple queries.";
+  } catch {
+    return "I couldn't generate a final answer after multiple queries.";
   }
 }
