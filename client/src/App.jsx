@@ -113,13 +113,8 @@ const TYPE_COLOR_CLASS = {
 };
 const FALLBACK_FILL_CLASSES = ["fill-blue", "fill-red", "fill-amber", "fill-teal", "fill-purple", "fill-orange"];
 
-const BUCKET_COLOR_CLASS = {
-  "0–3": "fill-teal",
-  "3–5": "fill-blue",
-  "5–7": "fill-amber",
-  "7–9": "fill-orange",
-  "9–10": "fill-red",
-};
+
+
 
 function BarChart({ data, colorClassMap, fallbackClasses, compact }) {
   const max = Math.max(1, ...Object.values(data));
@@ -218,6 +213,9 @@ export default function App() {
   const [aiBriefing, setAiBriefing] = useState(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [statuses, setStatuses] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
+  const [sortCol, setSortCol] = useState("priority");
+  const [sortDir, setSortDir] = useState("desc");
   const [highlightId, setHighlightId] = useState(null);
   const [scrollTarget, setScrollTarget] = useState(null);
   const saveRef = useRef(null);
@@ -247,15 +245,18 @@ export default function App() {
   }
 
   async function refresh({ fetchRules = false } = {}) {
-    const fetches = [getDashboard()];
-    console.log('fetches', fetches);
-    if (fetchRules) fetches.push(getRules());
-    const [d, r] = await Promise.all(fetches);
-    console.log('dashboard', d);
-    setDash(d);
-    if (d.allSignals) setAllSignals(d.allSignals);
-    if (r) setRules(r);
-    setPage(0);
+    setRefreshing(true);
+    try {
+      const fetches = [getDashboard()];
+      if (fetchRules) fetches.push(getRules());
+      const [d, r] = await Promise.all(fetches);
+      setDash(d);
+      if (d.allSignals) setAllSignals(d.allSignals);
+      if (r) setRules(r);
+      setPage(0);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   useEffect(() => {
@@ -351,10 +352,39 @@ export default function App() {
     }
     return true;
   });
-  const totalPages = Math.max(1, Math.ceil(filteredSignals.length / PAGE_SIZE));
+  const SEV_ORDER = { High: 3, Medium: 2, Low: 1 };
+  const sortedSignals = [...filteredSignals].sort((a, b) => {
+    const desc = sortDir === "desc";
+    if (sortCol === "score") {
+      return desc ? b.score - a.score : a.score - b.score;
+    }
+    if (sortCol === "priority") {
+      const sevA = SEV_ORDER[a.priority] ?? 0;
+      const sevB = SEV_ORDER[b.priority] ?? 0;
+      if (sevA !== sevB) return desc ? sevB - sevA : sevA - sevB;
+      return desc ? b.score - a.score : a.score - b.score;
+    }
+    const av = a[sortCol] ?? ""; const bv = b[sortCol] ?? "";
+    if (av < bv) return desc ? 1 : -1;
+    if (av > bv) return desc ? -1 : 1;
+    return 0;
+  });
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("desc"); }
+    setPage(0);
+  };
+
+  const SortIcon = ({ col }) => {
+    if (sortCol !== col) return <span className="sort-icon sort-icon-idle">⇅</span>;
+    return <span className="sort-icon">{sortDir === "desc" ? "↓" : "↑"}</span>;
+  };
+
+  const totalPages = Math.max(1, Math.ceil(sortedSignals.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
-  const pagedSignals = filteredSignals.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
-  const displayStart = filteredSignals.length ? safePage * PAGE_SIZE + 1 : 0;
+  const pagedSignals = sortedSignals.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const displayStart = sortedSignals.length ? safePage * PAGE_SIZE + 1 : 0;
   const displayEnd = safePage * PAGE_SIZE + pagedSignals.length;
 
   const k = dash.kpis;
@@ -469,9 +499,6 @@ export default function App() {
       <div className="briefing-box">
         <div className="briefing-box-header">
           <span className="briefing-box-title">✨ Planning Briefing</span>
-          <button className="link-btn" onClick={regenerateBriefing} disabled={briefingLoading}>
-            {briefingLoading ? "Generating…" : "Regenerate with AI"}
-          </button>
         </div>
         <div className="briefing-box-text">
           <InteractiveBriefing
@@ -490,7 +517,6 @@ export default function App() {
             <Activity size={15} className="metric-icon" />
           </div>
           <div className="metric-val">{k.total}</div>
-          <div className="metric-sub">all active signals</div>
         </div>
         <div className="metric metric-critical">
           <div className="metric-header">
@@ -498,7 +524,6 @@ export default function App() {
             <AlertTriangle size={15} className="metric-icon" />
           </div>
           <div className="metric-val red">{k.critical}</div>
-          <div className="metric-sub">priority ≥ 85</div>
         </div>
         <div className="metric metric-medium">
           <div className="metric-header">
@@ -506,7 +531,6 @@ export default function App() {
             <TrendingDown size={15} className="metric-icon" />
           </div>
           <div className="metric-val amber">{k.medium}</div>
-          <div className="metric-sub">priority 60 – 84</div>
         </div>
         <div className="metric metric-rules">
           <div className="metric-header">
@@ -514,7 +538,6 @@ export default function App() {
             <SlidersHorizontal size={15} className="metric-icon" />
           </div>
           <div className="metric-val green">{k.rulesActive}</div>
-          <div className="metric-sub">user-defined</div>
         </div>
       </div>
 
@@ -526,14 +549,6 @@ export default function App() {
             data={dash.byType}
             colorClassMap={TYPE_COLOR_CLASS}
             fallbackClasses={FALLBACK_FILL_CLASSES}
-          />
-        </div>
-        <div className="card">
-          <div className="card-title">Priority distribution</div>
-          <BarChart
-            data={dash.byBucket}
-            colorClassMap={BUCKET_COLOR_CLASS}
-            compact
           />
         </div>
       </div>
@@ -586,9 +601,14 @@ export default function App() {
       <div className="card signal-card">
         <div className="table-header-row">
           <div>
-            <div className="table-title">Signal table — prioritised</div>
+            <div className="table-title-row">
+              <div className="table-title">Signal table — prioritised</div>
+              <button className={`refresh-btn${refreshing ? " refresh-btn-spinning" : ""}`} onClick={() => refresh({ fetchRules: true })} title="Refresh signals" disabled={refreshing}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
+              </button>
+            </div>
             <div className="table-subtitle">
-              {displayStart}–{displayEnd} of {filteredSignals.length} signals &nbsp;·&nbsp; Page {safePage + 1} of {totalPages}
+              {displayStart}–{displayEnd} of {sortedSignals.length} signals &nbsp;·&nbsp; Page {safePage + 1} of {totalPages}
             </div>
           </div>
 
@@ -683,16 +703,76 @@ export default function App() {
           </div>
         )}
 
-        {pagedSignals.length === 0 ? (
-          <div className="empty-state">No signals match the current filters.</div>
-        ) : (
-          <div className="signal-table-wrap" style={{ overflowX: "auto" }}>
-            <table>
+        {refreshing ? (
+          <div className="signal-table-wrap">
+            <table className="signal-table">
+              <colgroup>
+                <col style={{ width: 145 }} />{/* Signal */}
+                <col style={{ width: 68 }} /> {/* Material */}
+                <col style={{ width: 48 }} /> {/* Plant */}
+                <col style={{ width: 72 }} /> {/* Sales Office */}
+                <col style={{ width: 82 }} /> {/* Month */}
+                <col style={{ width: 74 }} /> {/* Severity */}
+                <col style={{ width: 90 }} /> {/* Priority */}
+                <col style={{ width: 62 }} /> {/* Sales FS */}
+                <col style={{ width: 68 }} /> {/* Sales Contr. */}
+                <col style={{ width: 62 }} /> {/* Sales SA */}
+                <col />                        {/* Reason — fills remaining */}
+                <col style={{ width: 36 }} /> {/* Expand */}
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Signal</th><th>Material</th><th>Plant</th>
-                  <th>Month</th><th>Severity</th><th>Priority</th>
-                  <th>Reason</th><th></th>
+                  <th>Signal</th>
+                  <th className="th-sortable" onClick={() => handleSort("priority")}>Severity <SortIcon col="priority" /></th>
+                  <th className="th-sortable" onClick={() => handleSort("score")}>Priority <SortIcon col="score" /></th>
+                  <th>Material</th><th>Plant</th><th>Sales<br/>Office</th>
+                  <th>Month</th>
+                  <th>Sales Free<br/>Stock (t)</th>
+                  <th>Sales<br/>Contracts (t)</th>
+                  <th>Sales Scheduling<br/>Agreement (t)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i} className="skeleton-row">
+                    {Array.from({ length: 11 }).map((_, j) => (
+                      <td key={j}><div className="skeleton-cell" style={{ width: "70%" }} /></td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : pagedSignals.length === 0 ? (
+          <div className="empty-state">No signals match the current filters.</div>
+        ) : (
+          <div className="signal-table-wrap">
+            <table className="signal-table">
+              <colgroup>
+                <col style={{ width: 130 }} />{/* Signal */}
+                <col style={{ width: 78 }} /> {/* Severity */}
+                <col style={{ width: 82 }} /> {/* Priority */}
+                <col style={{ width: 65 }} /> {/* Material */}
+                <col style={{ width: 45 }} /> {/* Plant */}
+                <col style={{ width: 68 }} /> {/* Sales Office */}
+                <col style={{ width: 82 }} /> {/* Month */}
+                <col style={{ width: 82 }} /> {/* Sales Free Stock */}
+                <col style={{ width: 88 }} /> {/* Sales Contracts */}
+                <col style={{ width: 118 }} /> {/* Sales Scheduling Agreement */}
+                <col style={{ width: 36 }} /> {/* Expand */}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Signal</th>
+                  <th className="th-sortable" onClick={() => handleSort("priority")}>Severity <SortIcon col="priority" /></th>
+                  <th className="th-sortable" onClick={() => handleSort("score")}>Priority <SortIcon col="score" /></th>
+                  <th>Material</th><th>Plant</th><th>Sales<br/>Office</th>
+                  <th>Month</th>
+                  <th>Sales Free<br/>Stock (t)</th>
+                  <th>Sales<br/>Contracts (t)</th>
+                  <th>Sales Scheduling<br/>Agreement (t)</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -722,9 +802,9 @@ export default function App() {
           onSaved={(savedName) => {
             setBuilder(null);
             if (savedName && !builder._id) {
-              setTypeFilter(savedName);
-              setUrgencyFilter("all");
-              setStatusFilter("all");
+              setTypeFilters([savedName]);
+              setUrgencyFilter([]);
+              setStatusFilter([]);
               setPage(0);
             }
             refresh({ fetchRules: true });
@@ -1199,9 +1279,6 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
           <span className={`pill ${pillClass}`}>{s.type}</span>
           {signalStatus && <span className={`status-badge status-${signalStatus}`}>{signalStatus}</span>}
         </td>
-        <td style={{ fontWeight: 500 }}>{s.material}</td>
-        <td>{s.plant}</td>
-        <td>{s.month}</td>
         <td><span className={`pill ${urgencyPill[s.priority] || "pill-teal"}`}>{s.priority}</span></td>
         <td>
           <div className="score-bar">
@@ -1211,7 +1288,13 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
             <span className={`score-badge ${scoreBadge}`}>{s.score}</span>
           </div>
         </td>
-        <td><span className="detail-text" title={s.detail}>{s.detail}</span></td>
+        <td style={{ fontWeight: 500 }}>{s.material}</td>
+        <td>{s.plant}</td>
+        <td>{s.salesOffice}</td>
+        <td>{s.month}</td>
+        <td className="num-cell">{s.sales_free_stock_in_tons != null ? s.sales_free_stock_in_tons.toFixed(1) : "—"}</td>
+        <td className="num-cell">{s.sales_contracts_in_tons != null ? s.sales_contracts_in_tons.toFixed(1) : "—"}</td>
+        <td className="num-cell">{s.sales_scheduling_agreement_in_tons != null ? s.sales_scheduling_agreement_in_tons.toFixed(1) : "—"}</td>
         <td className="expand-cell">
           <button className={`expand-btn${expanded ? " expand-btn-open" : ""}`} onClick={(e) => { e.stopPropagation(); onToggle(); }} title={expanded ? "Collapse" : "Expand"}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -1220,10 +1303,13 @@ function Row({ s, expanded, highlighted, onToggle, signalStatus, onSetStatus, on
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={8} style={{ padding: 0 }}>
+          <td colSpan={11} style={{ padding: 0 }}>
             <div className="sig-detail">
               <div className="sig-detail-why">
                 <div className="sig-detail-section-title">Why this fired</div>
+                {s.description && (
+                  <p className="sig-rule-description">{s.description}</p>
+                )}
                 <SnapshotView snap={s.snapshot} s={s} />
               </div>
               <div className="sig-detail-actions">

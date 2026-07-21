@@ -29,6 +29,7 @@ const groupSchema = new mongoose.Schema(
 const ruleSchema = new mongoose.Schema(
   {
     name: String,
+    description: String,
     // Formula-based rules (AI-generated arbitrary expressions)
     formula: String,
     detail_label: String,

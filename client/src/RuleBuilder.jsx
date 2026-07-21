@@ -808,6 +808,18 @@ export default function RuleBuilder({ existing, onClose, onSaved }) {
                 />
               </div>
 
+              {/* Optional description */}
+              <div className="rb-field">
+                <label className="rb-label">Description <span className="rb-label-optional">(optional)</span></label>
+                <textarea
+                  className="rb-input rb-textarea"
+                  value={draft.description || ""}
+                  onChange={(e) => set("description", e.target.value)}
+                  placeholder="Explain why this rule matters or what action to take when it fires…"
+                  rows={2}
+                />
+              </div>
+
               {/* Conditions section */}
               <div className="rb-field">
                 <div className="rb-conditions-label-row">
