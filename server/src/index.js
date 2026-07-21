@@ -169,31 +169,20 @@ app.get("/api/briefing", async (_req, res) => {
 app.post("/api/chat", async (req, res) => {
   const { question, history } = req.body || {};
   if (!question) return res.status(400).json({ error: "question required" });
+  const [signals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
+  const context = buildChatContext(getRows(), signals, rules);
 
-  // Stream thinking steps + final answer via Server-Sent Events.
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  const emit = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`); };
-
+  let salesAnalysis = null;
   try {
-    const [signals, rules] = await Promise.all([getCachedSignals(), getCachedRules()]);
-    const context = buildChatContext(getRows(), signals, rules);
-
-    let salesAnalysis = null;
-    try {
-      salesAnalysis = await buildSalesAnalysisContext(question, { rows: getRows(), signals });
-    } catch (e) {
-      console.log("sales analysis failed:", e.message);
-    }
-
-    const onStep = (step) => emit(step);
-    const answer = await answerQuestion(question, context, history || [], salesAnalysis, onStep);
-    emit({ type: "answer", text: answer });
+    salesAnalysis = await buildSalesAnalysisContext(question, { rows: getRows(), signals });
   } catch (e) {
-    emit({ type: "answer", text: "Sorry, the assistant encountered an error." });
+    console.log("sales analysis failed:", e.message);
   }
-  res.end();
+
+  res.json({
+    answer: await answerQuestion(question, context, history || [], salesAnalysis),
+    usedSalesAnalysis: Boolean(salesAnalysis),
+  });
 });
 
 // --- AI suggested actions for one signal, grounded in its underlying orders ---

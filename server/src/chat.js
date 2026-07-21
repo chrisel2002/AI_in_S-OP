@@ -70,7 +70,7 @@ ${context}
 ${salesAnalysis ? `\nSALES ANALYSIS (pre-computed from order-level + planning data):\n${salesAnalysis}` : ""}`;
 }
 
-export async function answerQuestion(question, context, history = [], salesAnalysis = null, onStep = null) {
+export async function answerQuestion(question, context, history = [], salesAnalysis = null) {
   if (!llmEnabled()) return "The AI assistant is currently disabled (no API key configured).";
 
   const systemPrompt = buildSystemPrompt(context, salesAnalysis);
@@ -110,9 +110,7 @@ export async function answerQuestion(question, context, history = [], salesAnaly
       let resultText;
       try {
         const args = JSON.parse(toolCall.function.arguments || "{}");
-        onStep?.({ type: "querying", collection: args.collection });
         const result = await runQuery(args.collection, args.pipeline);
-        onStep?.({ type: "result", rowCount: result.rowCount, capped: Boolean(result.cappedAt) });
         resultText = JSON.stringify(result, null, 2);
         if (resultText.length > MAX_TOOL_RESULT_CHARS) {
           resultText = resultText.slice(0, MAX_TOOL_RESULT_CHARS) +
