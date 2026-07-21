@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { askChat } from "./api.js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -32,24 +31,57 @@ export default function Chat() {
   const [showHistory, setShowHistory] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [thinkingSteps, setThinkingSteps] = useState([]);
   const endRef = useRef(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, thinkingSteps]);
 
   async function send(q) {
     const question = (q ?? input).trim();
     if (!question || loading) return;
-    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    const msgHistory = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((m) => [...m, { role: "user", content: question }]);
     setInput("");
     setLoading(true);
+    setThinkingSteps([]);
     try {
-      const r = await askChat(question, history);
-      setMessages((m) => [...m, { role: "assistant", content: r.answer }]);
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, history: msgHistory }),
+      });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      const steps = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+          let evt;
+          try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+          if (evt.type === "querying") {
+            steps.push({ kind: "query", text: `Querying ${evt.collection}…` });
+            setThinkingSteps([...steps]);
+          } else if (evt.type === "result") {
+            steps.push({ kind: "result", text: `${evt.rowCount} row${evt.rowCount !== 1 ? "s" : ""} returned${evt.capped ? " (capped)" : ""}` });
+            setThinkingSteps([...steps]);
+          } else if (evt.type === "answer") {
+            setMessages((m) => [...m, { role: "assistant", content: evt.text }]);
+            setThinkingSteps([]);
+          }
+        }
+      }
     } catch {
       setMessages((m) => [...m, { role: "assistant", content: "Sorry, I couldn't reach the assistant." }]);
+      setThinkingSteps([]);
     } finally {
       setLoading(false);
     }
@@ -159,7 +191,17 @@ export default function Chat() {
               ) : m.content}
             </div>
           ))}
-          {loading && <div className="chat-msg chat-assistant">Thinking…</div>}
+          {loading && (
+            <div className="chat-thinking">
+              {thinkingSteps.map((s, i) => (
+                <div key={i} className={`thinking-step thinking-${s.kind}`}>
+                  {s.kind === "query" ? <span className="thinking-icon">⟳</span> : <span className="thinking-icon thinking-icon-result">↳</span>}
+                  {s.text}
+                </div>
+              ))}
+              <div className="thinking-dots"><span /><span /><span /></div>
+            </div>
+          )}
           <div ref={endRef} />
         </div>
       )}
