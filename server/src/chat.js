@@ -60,14 +60,45 @@ TOOL USAGE GUIDELINES:
 - If a query errors, try a simpler version or a different approach and explain what you tried.
 - Never fabricate numbers — only cite figures that came from the pre-computed context or from tool results you actually received.
 
-ANSWER FORMAT:
-- Use markdown. Tables for comparable data, bold for key numbers.
-- Cite the actual material/plant/sales-office/customer IDs from results — never generic examples.
-- If the data genuinely can't answer the question, say so clearly.
+ANSWER FORMAT — follow these rules strictly:
+1. No preamble. Start directly with the answer — never restate the question or say what you are about to do.
+2. Any list of 3+ materials, customers, signals, or plants MUST be a markdown table with column headers. Example:
+
+| Material | Sales Office | Customer | Volume (t) | Share |
+|----------|-------------|----------|------------|-------|
+| 12300    | 68          | 2372874  | 0.065      | **48%** |
+
+3. Bold the single most important number in each table row.
+4. After any table, add 1–3 short bullet points with the key takeaway or recommended action — nothing else.
+5. For prose answers (2 items or fewer), use plain sentences with bold key numbers.
+6. Cite actual IDs — never say "several materials" or leave fields blank.
+7. If the data cannot answer the question, say so in one sentence.
 
 DATA CONTEXT (pre-computed summary — always available):
 ${context}
 ${salesAnalysis ? `\nSALES ANALYSIS (pre-computed from order-level + planning data):\n${salesAnalysis}` : ""}`;
+}
+
+// Plain prompt used when the API does not support tool calling.
+// Must NOT mention tools — otherwise the model emits a tool call with content:null,
+// chatLLM returns "", and the user sees "Sorry, the assistant is unavailable".
+function buildFallbackSystemPrompt(context, salesAnalysis) {
+  return (
+    "You are an analyst assistant for a Sales & Operations Planning (S&OP) dashboard at ThyssenKrupp.\n\n" +
+    "ANSWER FORMAT — follow these rules strictly:\n" +
+    "1. No preamble. Start directly with the answer — never restate the question or say what you are about to do.\n" +
+    "2. Any list of 3+ materials, customers, signals, or plants MUST be a markdown table with column headers. Example:\n\n" +
+    "| Material | Sales Office | Customer | Volume (t) | Share |\n" +
+    "|----------|-------------|----------|------------|-------|\n" +
+    "| 12300    | 68          | 2372874  | 0.065      | **48%** |\n\n" +
+    "3. Bold the single most important number in each table row.\n" +
+    "4. After any table, add 1–3 short bullet points with the key takeaway or recommended action — nothing else.\n" +
+    "5. For prose answers (2 items or fewer), use plain sentences with bold key numbers.\n" +
+    "6. Cite actual IDs from the data — never say 'several materials' or leave fields blank.\n" +
+    "7. If the data cannot answer the question, say so in one sentence.\n\n" +
+    "DATA CONTEXT:\n" + context +
+    (salesAnalysis ? `\n\nSALES ANALYSIS:\n${salesAnalysis}` : "")
+  );
 }
 
 export async function answerQuestion(question, context, history = [], salesAnalysis = null) {
@@ -89,10 +120,17 @@ export async function answerQuestion(question, context, history = [], salesAnaly
       response = await chatLLMWithTools(thread, [QUERY_TOOL]);
     } catch (e) {
       console.log("chatLLMWithTools failed:", e.message);
-      // Fall back to plain completion without tools.
+      // API doesn't support tool calling — rebuild a clean thread with a
+      // tool-free system prompt so the model doesn't try to emit a tool call.
       try {
-        return (await chatLLM(thread)) || "Sorry, the assistant is unavailable right now.";
-      } catch {
+        const fallbackMessages = [
+          { role: "system", content: buildFallbackSystemPrompt(context, salesAnalysis) },
+          ...history.slice(-6),
+          { role: "user", content: question },
+        ];
+        return (await chatLLM(fallbackMessages)) || "I couldn't generate an answer.";
+      } catch (e2) {
+        console.log("chatLLM fallback also failed:", e2.message);
         return "Sorry, the assistant is unavailable right now.";
       }
     }

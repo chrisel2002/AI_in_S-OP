@@ -626,14 +626,17 @@ async function migrateRules() {
 
 // --- boot ---------------------------------------------------------------
 async function start() {
+  console.log("boot: connecting to store...");
   await initStore(MONGO_URI);
   if (storageBackend() !== "mongo") {
     console.error("❌ Cannot start: MongoDB is required but not reachable. Check MONGO_URI / network access.");
     process.exit(1);
   }
+  console.log("boot: loading data from MongoDB...");
   await loadDataFromMongo();
+  console.log("boot: migrating rules...");
   await migrateRules();
-  // Warm up the cache so the first request is instant
+  console.log("boot: warming signal cache...");
   await getCachedSignals();
   console.log("✅ Signal cache warm");
   app.listen(PORT, () => console.log(`API ready on http://localhost:${PORT}`));

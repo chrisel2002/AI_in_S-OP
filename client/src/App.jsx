@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { getDashboard, getRules, deleteRule, getOrders, getAiBriefing, getSignalStatuses, setSignalStatus, clearSignalStatus, updateSignal, getAiRecommendations } from "./api.js";
 import RuleBuilder from "./RuleBuilder.jsx";
 import Chat from "./Chat.jsx";
+import Notes from "./Notes.jsx";
 import { ChevronLeft, ChevronRight, Activity, AlertTriangle, TrendingDown, SlidersHorizontal } from "lucide-react";
 
 function SearchableSelect({ value, onChange, options, placeholder = "All", labelMap = {}, multi = false }) {
@@ -218,6 +219,7 @@ export default function App() {
   const [sortDir, setSortDir] = useState("desc");
   const [highlightId, setHighlightId] = useState(null);
   const [scrollTarget, setScrollTarget] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const saveRef = useRef(null);
   const PAGE_SIZE = 100;
 
@@ -812,7 +814,8 @@ export default function App() {
         />
       )}
 
-      <Chat />
+      <Notes chatOpen={chatOpen} />
+      <Chat onOpenChange={setChatOpen} />
     </div>
     </>
   );
