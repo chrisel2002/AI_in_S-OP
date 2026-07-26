@@ -24,8 +24,10 @@ function sessionTitle(messages) {
   return first.content.length > 45 ? first.content.slice(0, 45) + "…" : first.content;
 }
 
-export default function Chat() {
+export default function Chat({ onOpenChange }) {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => { onOpenChange?.(open); }, [open]);
   const [enlarged, setEnlarged] = useState(false);
   const [messages, setMessages] = useState([]);
   const [history, setHistory] = useState(loadHistory);

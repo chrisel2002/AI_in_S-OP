@@ -61,7 +61,9 @@ export function loadData() {
 // Assumes mongoose is already connected (see store.initStore).
 export async function loadDataFromMongo() {
   const coll = mongoose.connection.db.collection(PLAN_COLLECTION);
-  const docs = await coll.find({}).toArray();
+  console.log("  fetching plan rows from Atlas...");
+  const docs = await coll.find({}).maxTimeMS(60000).toArray();
+  console.log(`  received ${docs.length.toLocaleString()} documents, mapping...`);
   ROWS = docs.map((d) => {
     const row = { ...d, _id: String(d._id), date: normalizeDate(d.date) };
     for (const col of NUMERIC) row[col] = Number(row[col]) || 0;
